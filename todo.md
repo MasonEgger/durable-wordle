@@ -1,12 +1,12 @@
 # Demo Wordle - Implementation Checklist
 
 ## Step 1: Project Scaffolding
-- [ ] 1.1 Create pyproject.toml with dependencies and tool config
-- [ ] 1.2 Create directory structure with placeholder files
-- [ ] 1.3 Create justfile with recipes
-- [ ] 1.4 Create .gitignore
-- [ ] 1.5 Run `uv sync` to install dependencies
-- [ ] 1.6 Run `just check` to verify clean state
+- [x] 1.1 Create pyproject.toml with dependencies and tool config
+- [x] 1.2 Create directory structure with placeholder files
+- [x] 1.3 Create justfile with recipes
+- [x] 1.4 Create .gitignore
+- [x] 1.5 Run `uv sync` to install dependencies
+- [x] 1.6 Run `just check` to verify clean state
 
 ## Step 2: Data Models
 - [ ] 2.1 RED: Write model tests in tests/test_models.py

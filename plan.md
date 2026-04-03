@@ -4,7 +4,7 @@
 
 | Step | Description | Status |
 |------|-------------|--------|
-| 1 | Project Scaffolding | Not Started |
+| 1 | Project Scaffolding | Done |
 | 2 | Data Models | Not Started |
 | 3 | Word Lists | Not Started |
 | 4 | Game Logic (calculate_feedback) | Not Started |
