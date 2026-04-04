@@ -2,57 +2,74 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project
 
-Demo Wordle is a Temporal-powered Wordle clone for live presentations teaching workflow concepts. It is a teaching tool, not a production app — prioritize clarity over robustness.
+Durable Wordle — a Wordle clone where each game session is a Temporal workflow. No database; the workflow *is* the state. Built as a conference demo teaching five Temporal concepts: start_workflow, Updates, Activities, durability, and workflow completion.
 
-## Tech Stack
+## Stack
 
-- **Backend**: Temporal Python SDK, FastAPI, Jinja2
-- **Frontend**: HTMX + Tailwind CSS (CDN, no build step), embedded JS for animations
-- **Package manager**: uv
+- **Backend**: Temporal Python SDK (`temporalio`), FastAPI, Jinja2
+- **Frontend**: HTMX, Tailwind CSS (CDN)
+- **Package management**: uv
 - **Task runner**: just
+- **Deployment**: Docker Compose with Temporal dev server
 
 ## Commands
 
 ```bash
-just install        # uv sync
-just check          # ruff format --check + ruff check + pyright + pytest
-just fmt            # ruff format + ruff check --fix
-just test           # pytest -v
-just worker         # Start Temporal worker
-just api            # Start FastAPI with uvicorn --reload
-just start-game     # Start a Daily Game Workflow
+just check      # lint + typecheck + test (the gate)
+just test       # uv run pytest
+just lint       # uv run ruff check src/ tests/
+just typecheck  # uv run mypy src/
+just format     # uv run ruff format src/ tests/
+just worker     # start Temporal worker
+just server     # start FastAPI dev server (uvicorn --reload)
 ```
 
 Run a single test: `uv run pytest tests/test_game_logic.py::test_name -v`
 
-Requires `temporal server start-dev` running separately for worker/api/start-game.
-
 ## Architecture
 
-Two Temporal workflows in a parent-child relationship:
+```
+Browser → (cookie) → FastAPI → (Update/Query) → UserSessionWorkflow
+                                                    ↓
+                                              validate_guess (Activity)
+                                              calculate_feedback (pure fn)
+```
 
-- **DailyGameWorkflow (parent)**: Picks a word via `pick_word` activity, spawns child workflows per player via `create_session` Update, tracks stats via `get_statistics` Query.
-- **UserSessionWorkflow (child)**: Handles one player's game. Guesses submitted via `submit_guess` Update, state read via `get_game_state` Query. Returns `GameResult` to parent on completion.
+- **One workflow per game session**: cookie holds session_id (UUID), workflow ID = `wordle-{date}-{session_id}`
+- **Update handler** (`make_guess`): validates guess, runs activity, computes feedback, mutates state, returns result
+- **Query handler** (`get_game_state`): returns current board state for rendering (read-only)
+- **Activity** (`validate_guess`): checks word against bundled list (sync activity, file I/O = side effect)
+- **Pure function** (`calculate_feedback`): green/yellow/gray logic with duplicate-letter handling
+- **Word selection**: `random.seed(date.toordinal())` — deterministic daily word, zero external deps
 
-FastAPI bridges the browser to Temporal — `POST /guess` sends Updates, `GET /` queries state, cookies track the player's child workflow ID.
+## Temporal Constraints
 
-### Key Design Decisions
+- Workflow code must be deterministic — no I/O, no `datetime.now()` (use `workflow.now()`), no `random` (use `workflow.random()`)
+- Import activities in workflows with `workflow.unsafe.imports_passed_through()`
+- Workflow and activity inputs use single dataclass pattern
+- Update validators must not mutate state or block
+- Sync activities require `ThreadPoolExecutor` on the worker
 
-- `calculate_feedback` is a **pure function** (not an activity) — it's deterministic, runs inside the workflow.
-- `pick_word` must be an activity because `random.choice` is non-deterministic.
-- Use **dataclasses** for all Temporal-facing data types (not Pydantic) for simpler serialization.
-- Task queue: `"demo-wordle"`. Workflow ID pattern: `demo-wordle-{date}`, child: `demo-wordle-{date}-{uuid}`.
-- `parent_close_policy=ABANDON` on child workflows so they survive parent completion.
+## Code Conventions
+
+- `src/durable_wordle/` layout — workflows.py and activities.py in separate files (SDK sandbox requirement)
+- All files start with 2-line ABOUTME comment (first line prefixed `ABOUTME: `)
+- Strict mypy — no `Any` types
+- Type hints on all functions, parameters, and return types
+- `X | None` over `Optional[X]` (PEP 604, Python 3.12+)
+- RST-format docstrings on all public interfaces
+- Absolute imports only — no relative imports
+- Empty `__init__.py` files — never add content to them
+- Descriptive variable names — no single-letter names (`i`, `j`, `x`); use `line_index`, `letter_index`, etc.
+- Use method references for queries/updates, not string names
+- Config via `DURABLE_WORDLE_TEMPORAL_HOST`, `DURABLE_WORDLE_TEMPORAL_NAMESPACE`, `DURABLE_WORDLE_TEMPORAL_TASK_QUEUE` env vars
 
 ## Testing
 
-- **Game logic**: Pure unit tests, no Temporal.
-- **Activities**: Use `ActivityEnvironment`.
-- **Workflows**: Use `WorkflowEnvironment.start_local()` with mock activities (`@activity.defn(name="original_name")`).
-- **API**: Use FastAPI `TestClient` with mocked Temporal client.
-
-## File Layout
-
-Source in `src/demo_wordle/`, templates in `templates/`, tests in `tests/`. See `spec.md` for the full project structure and `plan.md` for the implementation plan with TDD steps.
+- **Workflow tests**: `WorkflowEnvironment.start_local()` with real activities, unique `uuid4()` task queues per test
+- **Activity tests**: `ActivityEnvironment` for isolated activity testing
+- **API tests**: FastAPI `TestClient` with test Temporal environment (fixtures in `tests/conftest.py`)
+- **Pure logic**: direct unit tests for `calculate_feedback` and word lists
+- pytest-asyncio with `asyncio_mode = "auto"`
