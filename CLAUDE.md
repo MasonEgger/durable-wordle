@@ -45,6 +45,12 @@ flowchart LR
 - **Pure function** (`calculate_feedback`): green/yellow/gray logic with duplicate-letter handling
 - **Word selection**: `random.seed(date.toordinal())` — deterministic daily word, zero external deps
 
+## Key Modules
+
+- **`config.py`**: Frozen `Settings` dataclass + `load_settings()` factory reading `DURABLE_WORDLE_*` env vars
+- **`models.py`**: `LetterFeedback` enum (CORRECT/PRESENT/ABSENT), `GuessResult`, `GameState` with `is_game_over` property
+- **`game_logic.py`**: `calculate_feedback(guess, target)` — two-pass algorithm (exact matches first, then remaining letters) handling duplicate letters correctly
+
 ## Temporal Constraints
 
 - Workflow code must be deterministic — no I/O, no `datetime.now()` (use `workflow.now()`), no `random` (use `workflow.random()`)

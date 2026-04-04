@@ -3,6 +3,7 @@
 ## Recent
 <!-- 10 most recent lessons, newest first -->
 
+- Run `just format` after writing new files before `just check` — auto-fixes line-length issues and saves a manual edit round-trip (2026-04-04)
 - Use `@dataclass(frozen=True)` for config/settings objects — immutability is enforced at the language level, not by convention. Be ready to explain the choice since `frozen` can be confused with `frozenset` (2026-04-04)
 - When writing implementation plans that describe Python code, always read the user's language-specific rules files first — even when the output file is markdown, the plan content prescribes code patterns (2026-04-04)
 - Add a "Global Code Rules" section at the top of plan.md so execute-plan sees coding standards before any step, not buried in guidelines at the bottom (2026-04-04)
@@ -24,6 +25,7 @@
 - For Temporal Python workflow tests, use WorkflowEnvironment.start_local() with real activities (not mocks) when the activity is lightweight — simpler and tests the real integration (2026-04-04)
 
 ### Tooling
+- Run `just format` after writing new files before `just check` — auto-fixes line-length issues and saves a manual edit round-trip (2026-04-04)
 - Use `[dependency-groups]` not `[project.optional-dependencies]` for dev deps with uv — optional deps require explicit `uv sync --extra dev` (2026-04-03)
 - The correct hatchling build backend is `hatchling.build`, not `hatchling.backends` (2026-04-03)
 

@@ -5,7 +5,7 @@
 | Step | Description | Status |
 |------|-------------|--------|
 | 1 | Project Scaffolding & Configuration | Complete |
-| 2 | Models & Game Logic | Not Started |
+| 2 | Models & Game Logic | Complete |
 | 3 | Word Lists & Validation Activity | Not Started |
 | 4 | UserSessionWorkflow | Not Started |
 | 5 | FastAPI API & Session Management | Not Started |

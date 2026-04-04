@@ -9,12 +9,12 @@
 - [x] 6. Run `uv sync` and `just check`
 
 ## Step 2: Models & Game Logic
-- [ ] 1. RED: Write model construction tests (tests/test_models.py)
-- [ ] 2. GREEN: Create src/durable_wordle/models.py (LetterFeedback, GuessResult, GameState)
-- [ ] 3. RED: Write calculate_feedback tests (tests/test_game_logic.py)
-- [ ] 4. GREEN: Create src/durable_wordle/game_logic.py (calculate_feedback)
-- [ ] 5. REFACTOR: Review calculate_feedback for clarity
-- [ ] 6. Run `just check`
+- [x] 1. RED: Write model construction tests (tests/test_models.py)
+- [x] 2. GREEN: Create src/durable_wordle/models.py (LetterFeedback, GuessResult, GameState)
+- [x] 3. RED: Write calculate_feedback tests (tests/test_game_logic.py)
+- [x] 4. GREEN: Create src/durable_wordle/game_logic.py (calculate_feedback)
+- [x] 5. REFACTOR: Review calculate_feedback for clarity
+- [x] 6. Run `just check`
 
 ## Step 3: Word Lists & Validation Activity
 - [ ] 1. RED: Write word list tests (tests/test_word_lists.py)
