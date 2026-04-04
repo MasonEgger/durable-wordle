@@ -3,6 +3,7 @@
 ## Recent
 <!-- 10 most recent lessons, newest first -->
 
+- Use `@dataclass(frozen=True)` for config/settings objects — immutability is enforced at the language level, not by convention. Be ready to explain the choice since `frozen` can be confused with `frozenset` (2026-04-04)
 - When writing implementation plans that describe Python code, always read the user's language-specific rules files first — even when the output file is markdown, the plan content prescribes code patterns (2026-04-04)
 - Add a "Global Code Rules" section at the top of plan.md so execute-plan sees coding standards before any step, not buried in guidelines at the bottom (2026-04-04)
 - For Temporal Python workflow tests, use WorkflowEnvironment.start_local() with real activities (not mocks) when the activity is lightweight (e.g., in-memory list lookup) — simpler and tests the real integration (2026-04-04)
@@ -35,3 +36,6 @@
 
 ### Architecture
 - For teaching/demo projects, prioritize code clarity and minimal dependencies over production patterns — no factories, registries, or complex abstractions (2026-04-03)
+
+### Python
+- Use `@dataclass(frozen=True)` for config/settings objects — immutability enforced at language level, not convention (2026-04-04)

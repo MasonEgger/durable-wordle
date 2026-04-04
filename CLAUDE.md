@@ -30,11 +30,12 @@ Run a single test: `uv run pytest tests/test_game_logic.py::test_name -v`
 
 ## Architecture
 
-```
-Browser → (cookie) → FastAPI → (Update/Query) → UserSessionWorkflow
-                                                    ↓
-                                              validate_guess (Activity)
-                                              calculate_feedback (pure fn)
+```mermaid
+flowchart LR
+    Browser -->|cookie| FastAPI
+    FastAPI -->|Update / Query| UserSessionWorkflow
+    UserSessionWorkflow --> validate_guess["validate_guess (Activity)"]
+    UserSessionWorkflow --> calculate_feedback["calculate_feedback (pure fn)"]
 ```
 
 - **One workflow per game session**: cookie holds session_id (UUID), workflow ID = `wordle-{date}-{session_id}`

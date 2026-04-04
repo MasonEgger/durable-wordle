@@ -1,12 +1,12 @@
 # Durable Wordle — Todo Checklist
 
 ## Step 1: Project Scaffolding & Configuration
-- [ ] 1. Create pyproject.toml with dependencies and tooling config
-- [ ] 2. Create justfile with dev recipes (worker, server, test, lint, format, typecheck, check)
-- [ ] 3. Create package structure (src/durable_wordle/__init__.py, tests/__init__.py)
-- [ ] 4. RED: Write configuration tests (tests/test_config.py)
-- [ ] 5. GREEN: Create src/durable_wordle/config.py with Settings and env var loading
-- [ ] 6. Run `uv sync` and `just check`
+- [x] 1. Create pyproject.toml with dependencies and tooling config
+- [x] 2. Create justfile with dev recipes (worker, server, test, lint, format, typecheck, check)
+- [x] 3. Create package structure (src/durable_wordle/__init__.py, tests/__init__.py)
+- [x] 4. RED: Write configuration tests (tests/test_config.py)
+- [x] 5. GREEN: Create src/durable_wordle/config.py with Settings and env var loading
+- [x] 6. Run `uv sync` and `just check`
 
 ## Step 2: Models & Game Logic
 - [ ] 1. RED: Write model construction tests (tests/test_models.py)

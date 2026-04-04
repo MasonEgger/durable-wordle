@@ -4,7 +4,7 @@
 
 | Step | Description | Status |
 |------|-------------|--------|
-| 1 | Project Scaffolding & Configuration | Not Started |
+| 1 | Project Scaffolding & Configuration | Complete |
 | 2 | Models & Game Logic | Not Started |
 | 3 | Word Lists & Validation Activity | Not Started |
 | 4 | UserSessionWorkflow | Not Started |
