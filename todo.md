@@ -17,12 +17,12 @@
 - [x] 6. Run `just check`
 
 ## Step 3: Word Lists & Validation Activity
-- [ ] 1. RED: Write word list tests (tests/test_word_lists.py)
-- [ ] 2. GREEN: Create src/durable_wordle/word_lists.py (ANSWER_LIST, VALID_GUESSES, get_daily_word, is_valid_guess)
-- [ ] 3. RED: Write validate_guess activity tests (tests/test_activities.py)
-- [ ] 4. GREEN: Create src/durable_wordle/activities.py (validate_guess activity)
-- [ ] 5. REFACTOR: Ensure word lists use frozensets for O(1) lookup
-- [ ] 6. Run `just check`
+- [x] 1. RED: Write word list tests (tests/test_word_lists.py)
+- [x] 2. GREEN: Create src/durable_wordle/word_lists.py (ANSWER_LIST, VALID_GUESSES, get_daily_word, is_valid_guess)
+- [x] 3. RED: Write validate_guess activity tests (tests/test_activities.py)
+- [x] 4. GREEN: Create src/durable_wordle/activities.py (validate_guess activity)
+- [x] 5. REFACTOR: Ensure word lists use frozensets for O(1) lookup
+- [x] 6. Run `just check`
 
 ## Step 4: UserSessionWorkflow
 - [ ] 1. RED: Write workflow tests (tests/test_workflows.py)

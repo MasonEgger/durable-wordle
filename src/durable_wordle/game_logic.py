@@ -47,7 +47,5 @@ def calculate_feedback(guess: str, target: str) -> list[LetterFeedback]:
 
     # All positions are now assigned; cast away the None possibility
     return [
-        letter_feedback
-        for letter_feedback in feedback
-        if letter_feedback is not None
+        letter_feedback for letter_feedback in feedback if letter_feedback is not None
     ]

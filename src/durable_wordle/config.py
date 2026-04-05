@@ -28,9 +28,7 @@ def load_settings() -> Settings:
     :returns: A populated :class:`Settings` instance.
     """
     return Settings(
-        temporal_host=os.environ.get(
-            "DURABLE_WORDLE_TEMPORAL_HOST", "localhost:7233"
-        ),
+        temporal_host=os.environ.get("DURABLE_WORDLE_TEMPORAL_HOST", "localhost:7233"),
         temporal_namespace=os.environ.get(
             "DURABLE_WORDLE_TEMPORAL_NAMESPACE", "default"
         ),

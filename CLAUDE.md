@@ -28,6 +28,8 @@ just server     # start FastAPI dev server (uvicorn --reload)
 
 Run a single test: `uv run pytest tests/test_game_logic.py::test_name -v`
 
+**Tip**: Run `just format` before `just check` after writing new files — auto-fixes line-length issues and avoids a manual edit round-trip.
+
 ## Architecture
 
 ```mermaid
@@ -75,8 +77,8 @@ flowchart LR
 
 ## Testing
 
-- **Workflow tests**: `WorkflowEnvironment.start_local()` with real activities, unique `uuid4()` task queues per test
-- **Activity tests**: `ActivityEnvironment` for isolated activity testing
+- **Workflow tests**: `WorkflowEnvironment.start_local()` with real activities, unique `uuid4()` task queues per test. Prefer real activities when they're lightweight (in-memory lookups); reserve mocks for activities with external dependencies (APIs, databases)
+- **Activity tests**: `ActivityEnvironment` for isolated activity testing. `validate_guess` is a sync activity, so `ActivityEnvironment.run()` returns directly — do not `await` it
 - **API tests**: FastAPI `TestClient` with test Temporal environment (fixtures in `tests/conftest.py`)
 - **Pure logic**: direct unit tests for `calculate_feedback` and word lists
 - pytest-asyncio with `asyncio_mode = "auto"`
