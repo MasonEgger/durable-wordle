@@ -45,8 +45,8 @@
 - [x] 5. Run `just check`
 
 ## Step 7: Worker & Docker Compose
-- [ ] 1. Create src/durable_wordle/worker.py
-- [ ] 2. Create Dockerfile
-- [ ] 3. Create docker-compose.yml
+- [x] 1. Create src/durable_wordle/worker.py
+- [x] 2. Create Dockerfile
+- [x] 3. Create docker-compose.yml
 - [ ] 4. Test locally with docker-compose up
-- [ ] 5. Run `just check` final verification
+- [x] 5. Run `just check` final verification

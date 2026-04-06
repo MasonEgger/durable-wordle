@@ -4,7 +4,7 @@ worker:
     uv run python -m durable_wordle.worker
 
 server:
-    uv run uvicorn durable_wordle.api:app --reload
+    uv run uvicorn --factory durable_wordle.api:create_production_app --reload
 
 test:
     uv run pytest

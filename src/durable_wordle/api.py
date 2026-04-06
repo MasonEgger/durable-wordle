@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.service import RPCError
 
+from durable_wordle.config import load_settings
 from durable_wordle.models import GameState, GuessResult, LetterFeedback
 from durable_wordle.word_lists import get_daily_word
 from durable_wordle.workflows import (
@@ -295,3 +296,18 @@ def create_app(
         )
 
     return app
+
+
+def create_production_app() -> FastAPI:
+    """Create the app using environment-based settings.
+
+    Used as a uvicorn factory entry point via ``--factory``.
+
+    :returns: A configured FastAPI application instance.
+    """
+    settings = load_settings()
+    return create_app(
+        temporal_url=settings.temporal_host,
+        temporal_namespace=settings.temporal_namespace,
+        task_queue=settings.temporal_task_queue,
+    )

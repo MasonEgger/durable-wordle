@@ -54,7 +54,8 @@ flowchart LR
 - **`game_logic.py`**: `calculate_feedback(guess, target)` — two-pass algorithm (exact matches first, then remaining letters) handling duplicate letters correctly
 - **`workflows.py`**: `UserSessionWorkflow` — Update handler (`make_guess`), validator, Query handler (`get_game_state`), `wait_condition` for game over
 - **`activities.py`**: `validate_guess` sync activity — checks word against bundled list via `is_valid_guess`
-- **`api.py`**: `create_app()` factory — FastAPI app with cookie-based sessions, Temporal client lifecycle via lifespan (or direct injection for tests), routes: `GET /`, `POST /guess`, `GET /health`
+- **`api.py`**: `create_app()` factory — FastAPI app with cookie-based sessions, Temporal client lifecycle via lifespan (or direct injection for tests), routes: `GET /`, `POST /guess`, `GET /health`. `create_production_app()` wraps the factory with `load_settings()` for uvicorn `--factory` mode
+- **`worker.py`**: Temporal worker entry point — connects via `load_settings()`, registers `UserSessionWorkflow` and `validate_guess`, uses `ThreadPoolExecutor` for sync activities
 
 ## Temporal Constraints
 

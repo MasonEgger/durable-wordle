@@ -12,7 +12,6 @@
 - Use `pytest_asyncio.fixture(scope="session")` with manual `shutdown()` for sharing a Temporal test environment — set `asyncio_default_fixture_loop_scope = "session"` in pyproject.toml (2026-04-06)
 - Sending an update to a completed workflow raises `RPCError` (not `WorkflowUpdateFailedError`) — catch both when testing post-completion behavior (2026-04-06)
 - For sync Temporal activities, `ActivityEnvironment.run()` returns directly — don't use `async def` test methods or `await` (2026-04-05)
-- When generating large hardcoded word lists by hand, validate every entry's length programmatically — typos like 4-letter or 6-letter words are easy to miss and cause multiple fix cycles (2026-04-05)
 
 ## Categories
 <!-- Lessons organized by topic -->
