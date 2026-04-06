@@ -8,7 +8,7 @@
 | 2 | Models & Game Logic | Complete |
 | 3 | Word Lists & Validation Activity | Complete |
 | 4 | UserSessionWorkflow | Complete |
-| 5 | FastAPI API & Session Management | Not Started |
+| 5 | FastAPI API & Session Management | Complete |
 | 6 | Frontend Template (HTMX/Tailwind) | Not Started |
 | 7 | Worker & Docker Compose | Not Started |
 

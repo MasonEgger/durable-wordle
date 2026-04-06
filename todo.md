@@ -31,11 +31,11 @@
 - [x] 4. Run `just check`
 
 ## Step 5: FastAPI API & Session Management
-- [ ] 1. Create minimal templates/index.html placeholder
-- [ ] 2. RED: Write API tests (tests/test_api.py, tests/conftest.py)
-- [ ] 3. GREEN: Create src/durable_wordle/api.py (routes, session management, Temporal client)
-- [ ] 4. REFACTOR: Extract Temporal client lifecycle
-- [ ] 5. Run `just check`
+- [x] 1. Create minimal templates/index.html placeholder
+- [x] 2. RED: Write API tests (tests/test_api.py, tests/conftest.py)
+- [x] 3. GREEN: Create src/durable_wordle/api.py (routes, session management, Temporal client)
+- [x] 4. REFACTOR: Extract Temporal client lifecycle
+- [x] 5. Run `just check`
 
 ## Step 6: Frontend Template (HTMX/Tailwind)
 - [ ] 1. RED: Write template rendering tests (add to tests/test_api.py)

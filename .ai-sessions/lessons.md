@@ -3,6 +3,9 @@
 ## Recent
 <!-- 10 most recent lessons, newest first -->
 
+- When testing FastAPI with `httpx.ASGITransport`, set `app.state` directly — the lifespan context manager is NOT triggered by ASGITransport (2026-04-06)
+- For Temporal API integration tests, use inline Workers per test (not async fixture workers) — ASGITransport and fixture-based workers have event loop cooperation issues that cause hanging (2026-04-06)
+- When setting cookies in FastAPI handlers, set them on the actual returned response (e.g. `TemplateResponse`), not on a temporary `Response()` object that's discarded (2026-04-06)
 - Temporal Python SDK only supports `StrEnum` and `IntEnum` for enum serialization — `(str, Enum)` causes values to deserialize as lists of characters (2026-04-06)
 - When Temporal workflow tests hang, run with `-s` and check worker stderr for "Failing workflow task" messages — the real error is often a serialization failure, not a deadlock (2026-04-06)
 - Use `pytest_asyncio.fixture(scope="session")` with manual `shutdown()` for sharing a Temporal test environment — set `asyncio_default_fixture_loop_scope = "session"` in pyproject.toml (2026-04-06)
@@ -10,9 +13,6 @@
 - For sync Temporal activities, `ActivityEnvironment.run()` returns directly — don't use `async def` test methods or `await` (2026-04-05)
 - When generating large hardcoded word lists by hand, validate every entry's length programmatically — typos like 4-letter or 6-letter words are easy to miss and cause multiple fix cycles (2026-04-05)
 - When replacing a single item in a list, match replacement count exactly — don't expand the list as a side effect (2026-04-05)
-- Run `just format` after writing new files before `just check` — auto-fixes line-length issues and saves a manual edit round-trip (2026-04-04)
-- Use `@dataclass(frozen=True)` for config/settings objects — immutability is enforced at the language level, not by convention (2026-04-04)
-- For Temporal Python workflow tests, use WorkflowEnvironment.start_local() with real activities (not mocks) when the activity is lightweight — simpler and tests the real integration (2026-04-04)
 
 ## Categories
 <!-- Lessons organized by topic -->
@@ -25,6 +25,11 @@
 - For sync Temporal activities, `ActivityEnvironment.run()` returns directly — don't use `async def` test methods or `await` (2026-04-05)
 - Temporal Python SDK only supports `StrEnum` and `IntEnum` for enum serialization — `(str, Enum)` causes values to deserialize as lists of characters (2026-04-06)
 - Sending an update to a completed workflow raises `RPCError` (not `WorkflowUpdateFailedError`) — catch both when testing post-completion behavior (2026-04-06)
+
+### FastAPI / Testing
+- When testing FastAPI with `httpx.ASGITransport`, set `app.state` directly — the lifespan context manager is NOT triggered by ASGITransport (2026-04-06)
+- For Temporal API integration tests, use inline Workers per test (not async fixture workers) — ASGITransport and fixture-based workers have event loop cooperation issues that cause hanging (2026-04-06)
+- When setting cookies in FastAPI handlers, set them on the actual returned response (e.g. `TemplateResponse`), not on a temporary `Response()` object that's discarded (2026-04-06)
 
 ### Tooling
 - Run `just format` after writing new files before `just check` — auto-fixes line-length issues and saves a manual edit round-trip (2026-04-04)

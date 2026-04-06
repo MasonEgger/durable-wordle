@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Durable Wordle</title>
+</head>
+<body>
+    <h1>Durable Wordle</h1>
+
+    {% if error_message %}
+    <p id="error-message" style="color: red;">{{ error_message }}</p>
+    {% endif %}
+
+    {% if status_message %}
+    <p id="status-message">{{ status_message }}</p>
+    {% endif %}
+
+    <div id="game-board">
+        {% for guess in guesses %}
+        <div class="guess-row">
+            {% for letter_index in range(guess.feedback | length) %}
+            <span class="letter {{ guess.feedback[letter_index].value }}">
+                {{ guess.word[letter_index] }}
+            </span>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <p>Status: {{ status }}</p>
+
+    {% if status == "playing" %}
+    <form method="post" action="/guess">
+        <label for="guess-input">Your guess:</label>
+        <input type="text" id="guess-input" name="guess" maxlength="5" required>
+        <button type="submit">Submit</button>
+    </form>
+    {% endif %}
+</body>
+</html>
