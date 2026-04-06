@@ -15,7 +15,7 @@ services:
     depends_on:
       - temporal
     environment:
-      - DURABLE_WORDLE_TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_ADDRESS=temporal:7233
     restart: on-failure
 
   web:
@@ -26,4 +26,4 @@ services:
       - temporal
       - worker
     environment:
-      - DURABLE_WORDLE_TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_ADDRESS=temporal:7233

@@ -3,27 +3,31 @@
 ## Recent
 <!-- 10 most recent lessons, newest first -->
 
-- `temporalio/auto-setup` is deprecated — use `temporalio/temporal:latest` with command `server start-dev --ip 0.0.0.0` (the image entrypoint is already `temporal`, don't repeat it) (2026-04-06)
-- When bind-mounting a file into Docker that may not exist yet, Docker creates a directory instead — use named volumes or `touch` the file first (2026-04-06)
-- When testing HTML for element counts by class name, use `class="guess-row` not just `guess-row` — the bare string also matches JS/CSS references (2026-04-06)
+- When promoting a pure function to a Temporal activity, inline the logic rather than wrapping — avoids an extra file and indirection layer (2026-04-06)
+- Never run multiple pytest processes in background when tests use a session-scoped Temporal test server — zombie servers cause all subsequent test runs to hang (2026-04-06)
+- When a workflow has async initialization (activity in `run()` before `wait_condition`), add `await workflow.wait_condition(lambda: state is not None)` at the top of update handlers to prevent update-before-init races (2026-04-06)
+- Use `temporalio.envconfig.ClientConfig.load_client_connect_config()` instead of custom config modules — reads standard `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE` env vars and TOML profiles (2026-04-06)
+- Update validators cannot be async, cannot mutate state, and cannot call activities — they are read-only guards that reject by raising exceptions. No `WorkflowExecutionUpdateAccepted` event is written on rejection (2026-04-06)
+- For educational Temporal demos, wrap pure functions as activities when you want each step visible in the event history — observability value outweighs the minor overhead (2026-04-06)
+- Use `workflow.random()` for deterministic random in workflows and `workflow.now()` for deterministic time — both are replay-safe (2026-04-06)
 - For HTMX partial templates, use `{% include %}` in the full template and render the included file directly for partial responses — cleaner than Jinja2 block inheritance (2026-04-06)
 - When testing FastAPI with `httpx.ASGITransport`, set `app.state` directly — the lifespan context manager is NOT triggered by ASGITransport (2026-04-06)
 - For Temporal API integration tests, use inline Workers per test (not async fixture workers) — ASGITransport and fixture-based workers have event loop cooperation issues that cause hanging (2026-04-06)
-- When setting cookies in FastAPI handlers, set them on the actual returned response (e.g. `TemplateResponse`), not on a temporary `Response()` object that's discarded (2026-04-06)
-- When Temporal workflow tests hang, run with `-s` and check worker stderr for "Failing workflow task" messages — the real error is often a serialization failure, not a deadlock (2026-04-06)
-- Use `pytest_asyncio.fixture(scope="session")` with manual `shutdown()` for sharing a Temporal test environment — set `asyncio_default_fixture_loop_scope = "session"` in pyproject.toml (2026-04-06)
-- Sending an update to a completed workflow raises `RPCError` (not `WorkflowUpdateFailedError`) — catch both when testing post-completion behavior (2026-04-06)
 
 ## Categories
 <!-- Lessons organized by topic -->
 
 ### Temporal
 - Use dataclasses (not Pydantic) for Temporal workflow/activity data types to avoid needing pydantic_data_converter setup — simpler serialization out of the box (2026-04-03)
-- For Temporal demo projects, keep calculate_feedback as a pure function inside the workflow rather than an activity — it's deterministic and doesn't need activity overhead (2026-04-03)
+- For educational demos, wrap pure functions as activities when you want each step visible in event history — observability outweighs minor overhead (2026-04-06)
 - When planning TDD steps for Temporal projects, mock activities using `@activity.defn(name="original_name")` in workflow tests to avoid needing a running Temporal server (2026-04-03)
 - For Temporal Python workflow tests, use WorkflowEnvironment.start_local() with real activities (not mocks) when the activity is lightweight — simpler and tests the real integration (2026-04-04)
 - For sync Temporal activities, `ActivityEnvironment.run()` returns directly — don't use `async def` test methods or `await` (2026-04-05)
 - Sending an update to a completed workflow raises `RPCError` (not `WorkflowUpdateFailedError`) — catch both when testing post-completion behavior (2026-04-06)
+- When a workflow has async init (activity in `run()`), add `wait_condition` guards in update handlers to prevent update-before-init races (2026-04-06)
+- Update validators cannot be async, cannot mutate state, cannot call activities — they're read-only guards that reject by raising exceptions (2026-04-06)
+- Use `workflow.random()` for deterministic random and `workflow.now()` for deterministic time — both are replay-safe (2026-04-06)
+- Use `temporalio.envconfig.ClientConfig.load_client_connect_config()` instead of custom config — reads standard `TEMPORAL_ADDRESS`/`TEMPORAL_NAMESPACE` env vars (2026-04-06)
 
 ### FastAPI / Testing
 - When testing FastAPI with `httpx.ASGITransport`, set `app.state` directly — the lifespan context manager is NOT triggered by ASGITransport (2026-04-06)
@@ -46,11 +50,13 @@
 
 ### Architecture
 - For teaching/demo projects, prioritize code clarity and minimal dependencies over production patterns — no factories, registries, or complex abstractions (2026-04-03)
+- When promoting a pure function to a Temporal activity, inline the logic rather than wrapping — avoids an extra file and indirection (2026-04-06)
 
 ### Testing
 - Use `pytest_asyncio.fixture(scope="session")` with manual `shutdown()` for sharing a Temporal test environment — set `asyncio_default_fixture_loop_scope = "session"` in pyproject.toml (2026-04-06)
 - When Temporal workflow tests hang, run with `-s` and check worker stderr for "Failing workflow task" messages — the real error is often a serialization failure, not a deadlock (2026-04-06)
 - When testing HTML for element counts by class name, use `class="guess-row` not just `guess-row` — the bare string also matches JS/CSS references (2026-04-06)
+- Never run multiple pytest processes in background when tests use a session-scoped Temporal test server — zombie servers cause all subsequent runs to hang (2026-04-06)
 
 ### Frontend
 - For HTMX partial templates, use `{% include %}` in the full template and render the included file directly for partial responses — cleaner than Jinja2 block inheritance (2026-04-06)

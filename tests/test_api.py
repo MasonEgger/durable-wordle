@@ -9,10 +9,14 @@ from httpx import ASGITransport, AsyncClient
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from durable_wordle.activities import validate_guess
+from durable_wordle.activities import (
+    calculate_feedback,
+    select_daily_word,
+    validate_guess,
+)
 from durable_wordle.api import create_app
 from durable_wordle.word_lists import get_daily_word
-from durable_wordle.workflows import UserSessionWorkflow
+from durable_wordle.workflow import UserSessionWorkflow
 
 
 @pytest.fixture()
@@ -85,7 +89,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -102,7 +106,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -124,7 +128,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -142,7 +146,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -185,7 +189,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -203,7 +207,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -227,7 +231,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -245,7 +249,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -267,7 +271,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[validate_guess],
+                activities=[calculate_feedback, select_daily_word, validate_guess],
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:

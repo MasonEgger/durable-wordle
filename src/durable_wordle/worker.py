@@ -2,39 +2,43 @@
 # registers the workflow and activity, and runs the worker polling loop.
 import asyncio
 import concurrent.futures
+import os
 
 from temporalio.client import Client
+from temporalio.envconfig import ClientConfig
 from temporalio.worker import Worker
 
-from durable_wordle.activities import validate_guess
-from durable_wordle.config import load_settings
-from durable_wordle.workflows import UserSessionWorkflow
+from durable_wordle.activities import (
+    calculate_feedback,
+    select_daily_word,
+    validate_guess,
+)
+from durable_wordle.workflow import UserSessionWorkflow
+
+TASK_QUEUE = os.environ.get("TEMPORAL_TASK_QUEUE", "wordle-tasks")
 
 
 async def run_worker() -> None:
     """Connect to Temporal and run the worker until interrupted.
 
-    Reads connection settings from environment variables via
-    :func:`~durable_wordle.config.load_settings`, then creates a
-    :class:`~temporalio.worker.Worker` registered with the game
-    workflow and activity.
+    Uses Temporal's ``envconfig`` to load connection settings from
+    ``TEMPORAL_ADDRESS``, ``TEMPORAL_NAMESPACE``, etc. or a TOML
+    config file. The task queue is read from ``TEMPORAL_TASK_QUEUE``.
     """
-    settings = load_settings()
-    client = await Client.connect(
-        settings.temporal_host, namespace=settings.temporal_namespace
-    )
+    connect_config = ClientConfig.load_client_connect_config()
+    client = await Client.connect(**connect_config)
 
     with concurrent.futures.ThreadPoolExecutor() as activity_executor:
         worker = Worker(
             client,
-            task_queue=settings.temporal_task_queue,
+            task_queue=TASK_QUEUE,
             workflows=[UserSessionWorkflow],
-            activities=[validate_guess],
+            activities=[calculate_feedback, select_daily_word, validate_guess],
             activity_executor=activity_executor,
         )
         print(
-            f"Worker started on task queue '{settings.temporal_task_queue}' "
-            f"(host={settings.temporal_host}, namespace={settings.temporal_namespace})"
+            f"Worker started on task queue '{TASK_QUEUE}' "
+            f"(host={connect_config.get('target_host', 'default')})"
         )
         await worker.run()
 

@@ -1,6 +1,7 @@
 # ABOUTME: FastAPI web layer connecting browsers to Temporal workflows.
 # Handles session cookies, game board rendering, and Temporal client lifecycle.
 import datetime
+import os
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -13,14 +14,14 @@ from fastapi.templating import Jinja2Templates
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.service import RPCError
 
-from durable_wordle.config import load_settings
-from durable_wordle.models import GameState, GuessResult, LetterFeedback
-from durable_wordle.word_lists import get_daily_word
-from durable_wordle.workflows import (
+from durable_wordle.models import (
+    GameState,
+    GuessResult,
+    LetterFeedback,
     MakeGuessInput,
-    UserSessionWorkflow,
     WorkflowInput,
 )
+from durable_wordle.workflow import UserSessionWorkflow
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 
@@ -59,14 +60,25 @@ def _build_keyboard_state(
     return letter_states
 
 
-def get_workflow_id(game_date: datetime.date, session_id: str) -> str:
-    """Build a deterministic workflow ID from date and session.
+def get_workflow_id(
+    session_id: str,
+    game_date: datetime.date | None = None,
+    game_id: str | None = None,
+) -> str:
+    """Build a deterministic workflow ID from session and game context.
 
-    :param game_date: The date of the game.
     :param session_id: The player's session UUID.
-    :returns: A workflow ID in the format ``wordle-{date}-{session_id}``.
+    :param game_date: The date of the game (daily mode).
+    :param game_id: Unique game identifier (random mode).
+    :returns: A workflow ID string.
     """
-    return f"wordle-{game_date.isoformat()}-{session_id}"
+    if game_id:
+        return f"wordle-random-{game_id}"
+    return (
+        f"wordle-{game_date.isoformat()}-{session_id}"
+        if game_date
+        else f"wordle-{session_id}"
+    )
 
 
 async def _query_existing_game(client: Client, workflow_id: str) -> GameState | None:
@@ -92,17 +104,17 @@ async def _query_existing_game(client: Client, workflow_id: str) -> GameState | 
 async def _get_or_start_workflow(
     client: Client,
     workflow_id: str,
-    target_word: str,
     session_id: str,
     task_queue: str,
+    random_mode: bool = False,
 ) -> WorkflowHandle[UserSessionWorkflow, GameState]:
     """Get an existing workflow handle or start a new workflow.
 
     :param client: The Temporal client.
     :param workflow_id: The workflow ID.
-    :param target_word: The target word for a new game.
     :param session_id: The session ID.
     :param task_queue: The task queue for the worker.
+    :param random_mode: If True, pick a random word instead of daily.
     :returns: A workflow handle.
     """
     try:
@@ -118,7 +130,7 @@ async def _get_or_start_workflow(
 
     return await client.start_workflow(
         UserSessionWorkflow.run,
-        WorkflowInput(target_word=target_word, session_id=session_id),
+        WorkflowInput(session_id=session_id, random_mode=random_mode),
         id=workflow_id,
         task_queue=task_queue,
     )
@@ -233,10 +245,11 @@ def create_app(
         existing_session = request.cookies.get("session_id")
         session_id = existing_session or str(uuid.uuid4())
         is_new_session = existing_session is None
+        game_id = request.cookies.get("game_id")
 
         client: Client = app.state.temporal_client
         today = datetime.date.today()
-        workflow_id = get_workflow_id(today, session_id)
+        workflow_id = get_workflow_id(session_id, game_date=today, game_id=game_id)
 
         game_state = await _query_existing_game(client, workflow_id)
 
@@ -245,7 +258,11 @@ def create_app(
         )
 
     @app.post("/guess", response_class=HTMLResponse)
-    async def submit_guess(request: Request, guess: str = Form(...)) -> HTMLResponse:
+    async def submit_guess(
+        request: Request,
+        guess: str = Form(...),
+        random_mode: bool = Form(default=False),
+    ) -> HTMLResponse:
         """Process a guess submission.
 
         Starts a new workflow if needed, sends the guess as an Update,
@@ -253,6 +270,7 @@ def create_app(
 
         :param request: The incoming HTTP request.
         :param guess: The guessed word from the form.
+        :param random_mode: Whether to use random word selection.
         :returns: Rendered HTML game board with updated state.
         """
         existing_session = request.cookies.get("session_id")
@@ -262,11 +280,19 @@ def create_app(
         client: Client = app.state.temporal_client
         queue: str = app.state.task_queue
         today = datetime.date.today()
-        workflow_id = get_workflow_id(today, session_id)
-        target_word = get_daily_word(today)
 
+        # For random mode, use game_id cookie; for daily, use date
+        game_id = request.cookies.get("game_id")
+        if random_mode and not game_id:
+            game_id = str(uuid.uuid4())
+
+        workflow_id = get_workflow_id(
+            session_id,
+            game_date=None if random_mode else today,
+            game_id=game_id if random_mode else None,
+        )
         handle = await _get_or_start_workflow(
-            client, workflow_id, target_word, session_id, queue
+            client, workflow_id, session_id, queue, random_mode=random_mode
         )
 
         # Send guess via Update
@@ -285,7 +311,7 @@ def create_app(
         game_state = await _query_existing_game(client, workflow_id)
 
         is_htmx = request.headers.get("HX-Request") == "true"
-        return _render_board(
+        response = _render_board(
             templates,
             request,
             session_id,
@@ -294,6 +320,9 @@ def create_app(
             error_message=error_message,
             partial=is_htmx,
         )
+        if random_mode and game_id:
+            response.set_cookie(key="game_id", value=game_id, httponly=True)
+        return response
 
     return app
 
@@ -301,13 +330,19 @@ def create_app(
 def create_production_app() -> FastAPI:
     """Create the app using environment-based settings.
 
+    Uses Temporal's ``envconfig`` to load connection settings from
+    ``TEMPORAL_ADDRESS``, ``TEMPORAL_NAMESPACE``, etc. or a TOML
+    config file. The task queue is read from ``TEMPORAL_TASK_QUEUE``.
+
     Used as a uvicorn factory entry point via ``--factory``.
 
     :returns: A configured FastAPI application instance.
     """
-    settings = load_settings()
+    from temporalio.envconfig import ClientConfig
+
+    connect_config = ClientConfig.load_client_connect_config()
     return create_app(
-        temporal_url=settings.temporal_host,
-        temporal_namespace=settings.temporal_namespace,
-        task_queue=settings.temporal_task_queue,
+        temporal_url=connect_config.get("target_host", "localhost:7233"),
+        temporal_namespace=connect_config.get("namespace", "default"),
+        task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "wordle-tasks"),
     )

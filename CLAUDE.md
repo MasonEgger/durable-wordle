@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Durable Wordle — a Wordle clone where each game session is a Temporal workflow. No database; the workflow *is* the state. Built as a conference demo teaching five Temporal concepts: start_workflow, Updates, Activities, durability, and workflow completion.
 
+**Design principle**: The workflow must be the complete game — fully playable via Temporal CLI (`temporal workflow start/update/query`) without the web UI. The API is just a UI skin. Never put game logic in the API layer.
+
 ## Stack
 
 - **Backend**: Temporal Python SDK (`temporalio`), FastAPI, Jinja2
@@ -35,40 +37,41 @@ Run a single test: `uv run pytest tests/test_game_logic.py::test_name -v`
 ```mermaid
 flowchart LR
     Browser -->|cookie| FastAPI
-    FastAPI -->|Update / Query| UserSessionWorkflow
+    FastAPI -->|start / Update / Query| Temporal
+    Temporal --> UserSessionWorkflow
+    UserSessionWorkflow --> select_daily_word["select_daily_word (Activity)"]
     UserSessionWorkflow --> validate_guess["validate_guess (Activity)"]
-    UserSessionWorkflow --> calculate_feedback["calculate_feedback (pure fn)"]
+    UserSessionWorkflow --> calculate_feedback["calculate_feedback (Activity)"]
 ```
 
-- **One workflow per game session**: cookie holds session_id (UUID), workflow ID = `wordle-{date}-{session_id}`
-- **Update handler** (`make_guess`): validates guess, runs activity, computes feedback, mutates state, returns result
+- **One workflow per game session**: cookie holds session_id (UUID), workflow ID = `wordle-{date}-{session_id}` (daily) or `wordle-random-{game_id}` (random)
+- **Two game modes**: daily (default, `workflow.now()` + `select_daily_word` activity) and random (`workflow.random().choice()`)
+- **Update handler** (`make_guess`): waits for init, validates via activity, computes feedback via activity, mutates state, returns result
+- **Update validator**: synchronous read-only guard — rejects if game over, wrong length, or non-alphabetic. Cannot call activities or mutate state
 - **Query handler** (`get_game_state`): returns current board state for rendering (read-only)
-- **Activity** (`validate_guess`): checks word against bundled list (sync activity, file I/O = side effect)
-- **Pure function** (`calculate_feedback`): green/yellow/gray logic with duplicate-letter handling
-- **Word selection**: `random.seed(date.toordinal())` — deterministic daily word, zero external deps
+- **Three activities**: `select_daily_word` (word selection), `validate_guess` (dictionary check), `calculate_feedback` (green/yellow/gray feedback) — all sync, all appear in event history
 
 ## Key Modules
 
-- **`config.py`**: Frozen `Settings` dataclass + `load_settings()` factory reading `DURABLE_WORDLE_*` env vars
-- **`models.py`**: `LetterFeedback` enum (CORRECT/PRESENT/ABSENT), `GuessResult`, `GameState` with `is_game_over` property
-- **`game_logic.py`**: `calculate_feedback(guess, target)` — two-pass algorithm (exact matches first, then remaining letters) handling duplicate letters correctly
-- **`workflows.py`**: `UserSessionWorkflow` — Update handler (`make_guess`), validator, Query handler (`get_game_state`), `wait_condition` for game over
-- **`activities.py`**: `validate_guess` sync activity — checks word against bundled list via `is_valid_guess`
-- **`api.py`**: `create_app()` factory — FastAPI app with cookie-based sessions, Temporal client lifecycle via lifespan (or direct injection for tests), routes: `GET /`, `POST /guess`, `GET /health`. `create_production_app()` wraps the factory with `load_settings()` for uvicorn `--factory` mode
-- **`worker.py`**: Temporal worker entry point — connects via `load_settings()`, registers `UserSessionWorkflow` and `validate_guess`, uses `ThreadPoolExecutor` for sync activities
+- **`models.py`**: `LetterFeedback` enum (CORRECT/PRESENT/ABSENT), `GuessResult`, `GameState`, `WorkflowInput` (session_id + random_mode), `MakeGuessInput`, `ValidateGuessInput`, `SelectDailyWordInput`, `CalculateFeedbackInput`
+- **`workflow.py`**: `UserSessionWorkflow` — `run()` selects word then waits, `make_guess` Update handler with `wait_condition` guard for init race, `validate_make_guess` validator, `get_game_state` Query handler
+- **`activities.py`**: Three sync activities — `validate_guess` (word list check), `select_daily_word` (date-seeded selection), `calculate_feedback` (two-pass green/yellow/gray algorithm with duplicate-letter handling)
+- **`api.py`**: `create_app()` factory — FastAPI with cookie sessions, Temporal client lifecycle via lifespan (or direct injection for tests), routes: `GET /`, `POST /guess`, `GET /health`. `create_production_app()` uses `temporalio.envconfig` for connection settings
+- **`worker.py`**: Temporal worker entry point — connects via `temporalio.envconfig`, registers workflow and all three activities, uses `ThreadPoolExecutor` for sync activities
 
 ## Temporal Constraints
 
 - Workflow code must be deterministic — no I/O, no `datetime.now()` (use `workflow.now()`), no `random` (use `workflow.random()`)
-- Import activities in workflows with `workflow.unsafe.imports_passed_through()`
+- Import activities and models in workflows with `workflow.unsafe.imports_passed_through()`
 - Workflow and activity inputs use single dataclass pattern
 - Enums in workflow/activity data types must use `StrEnum` or `IntEnum` — the default data converter silently fails with `(str, Enum)`
-- Update validators must not mutate state or block
+- Update validators must not mutate state, must not block, cannot be async, cannot call activities
+- When workflow has async initialization (activity call before `wait_condition`), update handlers must guard with `await workflow.wait_condition(lambda: self._game_state is not None)`
 - Sync activities require `ThreadPoolExecutor` on the worker
 
 ## Code Conventions
 
-- `src/durable_wordle/` layout — workflows.py and activities.py in separate files (SDK sandbox requirement)
+- `src/durable_wordle/` layout — workflow.py and activities.py in separate files (SDK sandbox requirement)
 - All files start with 2-line ABOUTME comment (first line prefixed `ABOUTME: `)
 - Strict mypy — no `Any` types
 - Type hints on all functions, parameters, and return types
@@ -78,12 +81,12 @@ flowchart LR
 - Empty `__init__.py` files — never add content to them
 - Descriptive variable names — no single-letter names (`i`, `j`, `x`); use `line_index`, `letter_index`, etc.
 - Use method references for queries/updates, not string names
-- Config via `DURABLE_WORDLE_TEMPORAL_HOST`, `DURABLE_WORDLE_TEMPORAL_NAMESPACE`, `DURABLE_WORDLE_TEMPORAL_TASK_QUEUE` env vars
+- Config via Temporal's `envconfig` (`TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE` env vars) + `TEMPORAL_TASK_QUEUE` for app-specific queue name
 
 ## Testing
 
-- **Workflow tests**: `WorkflowEnvironment.start_local()` with real activities, unique `uuid4()` task queues per test. Prefer real activities when they're lightweight (in-memory lookups); reserve mocks for activities with external dependencies (APIs, databases)
-- **Activity tests**: `ActivityEnvironment` for isolated activity testing. `validate_guess` is a sync activity, so `ActivityEnvironment.run()` returns directly — do not `await` it
+- **Workflow tests**: `WorkflowEnvironment.start_local()` with real activities, unique `uuid4()` task queues per test. Use `random_mode=True` for predictable test flows; discover target word via query. Register all three activities in every test Worker
+- **Activity tests**: `ActivityEnvironment` for isolated activity testing. All activities are sync, so `ActivityEnvironment.run()` returns directly — do not `await` it
 - **API tests**: `httpx.AsyncClient` with `ASGITransport` + inline Workers per test (not fixture-based — ASGITransport doesn't trigger lifespan, and fixture workers cause event loop issues). Set `app.state` directly for test injection via `create_app(temporal_client=...)`
-- **Pure logic**: direct unit tests for `calculate_feedback` and word lists
+- **Game logic tests**: `test_game_logic.py` tests `calculate_feedback` via `ActivityEnvironment` (9 tests covering duplicates, case handling, etc.)
 - pytest-asyncio with `asyncio_mode = "auto"`

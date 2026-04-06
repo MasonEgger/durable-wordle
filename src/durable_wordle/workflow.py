@@ -1,37 +1,27 @@
 # ABOUTME: Temporal workflow for a single Wordle game session. Holds game state,
 # accepts guesses via Update, exposes state via Query, completes when game ends.
-from dataclasses import dataclass
 from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 
 with workflow.unsafe.imports_passed_through():
-    from durable_wordle.activities import ValidateGuessInput, validate_guess
-    from durable_wordle.game_logic import calculate_feedback
-    from durable_wordle.models import GameState, GuessResult, LetterFeedback
-
-
-@dataclass
-class WorkflowInput:
-    """Input for starting a new Wordle game session workflow.
-
-    :param target_word: The word the player must guess (uppercase).
-    :param session_id: Unique session identifier for this game.
-    """
-
-    target_word: str
-    session_id: str
-
-
-@dataclass
-class MakeGuessInput:
-    """Input for the make_guess update handler.
-
-    :param guess: The 5-letter word being guessed.
-    """
-
-    guess: str
+    from durable_wordle.activities import (
+        calculate_feedback,
+        select_daily_word,
+        validate_guess,
+    )
+    from durable_wordle.models import (
+        CalculateFeedbackInput,
+        GameState,
+        GuessResult,
+        LetterFeedback,
+        MakeGuessInput,
+        SelectDailyWordInput,
+        ValidateGuessInput,
+        WorkflowInput,
+    )
+    from durable_wordle.word_lists import ANSWER_LIST
 
 
 @workflow.defn
@@ -59,10 +49,23 @@ class UserSessionWorkflow:
     async def run(self, workflow_input: WorkflowInput) -> GameState:
         """Run the game session until completion.
 
-        :param workflow_input: Contains the target word and session ID.
+        Selects the target word — either the daily word via activity
+        or a random word using Temporal's deterministic RNG — then
+        waits for guesses until the player wins or exhausts all attempts.
+
+        :param workflow_input: Contains session ID and game mode.
         :returns: The final game state when the game is over.
         """
-        self._game_state = GameState(target_word=workflow_input.target_word.upper())
+        if workflow_input.random_mode:
+            target_word = workflow.random().choice(ANSWER_LIST)
+        else:
+            game_date = workflow.now().date().isoformat()
+            target_word = await workflow.execute_activity(
+                select_daily_word,
+                SelectDailyWordInput(game_date=game_date),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+        self._game_state = GameState(target_word=target_word)
 
         await workflow.wait_condition(lambda: self._state.is_game_over)
 
@@ -83,6 +86,9 @@ class UserSessionWorkflow:
         :raises ApplicationError: If the game is over, guess is invalid format,
             or word is not in the dictionary.
         """
+        # Wait for the select_daily_word activity to finish initializing state
+        await workflow.wait_condition(lambda: self._game_state is not None)
+
         normalized_guess = guess_input.guess.strip().upper()
 
         # Execute validate_guess activity to check word list
@@ -97,8 +103,14 @@ class UserSessionWorkflow:
                 type="InvalidWord",
             )
 
-        # Calculate letter feedback
-        feedback = calculate_feedback(normalized_guess, self._state.target_word)
+        # Calculate letter feedback via activity for event history visibility
+        feedback = await workflow.execute_activity(
+            calculate_feedback,
+            CalculateFeedbackInput(
+                guess=normalized_guess, target=self._state.target_word
+            ),
+            start_to_close_timeout=timedelta(seconds=10),
+        )
 
         # Build result and update state
         guess_result = GuessResult(word=normalized_guess, feedback=feedback)

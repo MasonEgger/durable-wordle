@@ -16,27 +16,33 @@ Each browser session starts a new Temporal workflow. The workflow ID is determin
 
 ### 2. Updates (`execute_update`)
 
-Guesses are submitted via Temporal's Update primitive — a request/response interaction that durably mutates workflow state and returns a result. The Update handler validates the guess, runs an activity, calculates feedback, and updates the game board in a single atomic operation.
+Guesses are submitted via Temporal's Update primitive — a request/response interaction that durably mutates workflow state and returns a result. The Update handler validates the guess, runs activities for word validation and feedback calculation, and updates the game board. An Update validator rejects invalid input (wrong length, non-alphabetic, game already over) before anything is written to history.
 
-**Where to look:** `workflows.py` → `UserSessionWorkflow.make_guess()`
+**Where to look:** `workflow.py` → `UserSessionWorkflow.make_guess()`
 
 ### 3. Queries (`query`)
 
 The game board is rendered by querying the workflow for its current state. Queries are read-only — they can't change workflow state, which makes them safe to call at any time.
 
-**Where to look:** `workflows.py` → `UserSessionWorkflow.get_game_state()`
+**Where to look:** `workflow.py` → `UserSessionWorkflow.get_game_state()`
 
 ### 4. Activities (`execute_activity`)
 
-Word validation runs as a Temporal Activity. Activities are the escape hatch for non-deterministic operations — file I/O, API calls, database queries. Here, the activity checks the guess against a bundled word list. If the worker crashes mid-validation, Temporal retries the activity automatically.
+Three activities demonstrate different use cases:
 
-**Where to look:** `activities.py` → `validate_guess()`
+- **`validate_guess`** — checks the guess against a bundled word list (file I/O side effect)
+- **`calculate_feedback`** — computes green/yellow/gray feedback per letter (recorded in event history for observability)
+- **`select_daily_word`** — picks the daily word from a date seed (non-deterministic randomness)
+
+Each activity appears as a distinct event in the workflow history, making every step of every guess inspectable in the Temporal UI.
+
+**Where to look:** `activities.py`
 
 ### 5. Durable Execution and Workflow Completion
 
 The workflow holds game state in memory and waits (`workflow.wait_condition`) until the game ends. If the worker restarts, Temporal replays the workflow's event history to rebuild the exact same state — no data loss, no recovery code. When the player wins or loses, the workflow completes and returns the final game state.
 
-**Where to look:** `workflows.py` → `UserSessionWorkflow.run()`
+**Where to look:** `workflow.py` → `UserSessionWorkflow.run()`
 
 ## Architecture
 
@@ -45,13 +51,15 @@ flowchart LR
     Browser -->|cookie| FastAPI
     FastAPI -->|start / Update / Query| Temporal
     Temporal --> UserSessionWorkflow
+    UserSessionWorkflow --> select_daily_word["select_daily_word (Activity)"]
     UserSessionWorkflow --> validate_guess["validate_guess (Activity)"]
-    UserSessionWorkflow --> calculate_feedback["calculate_feedback (pure fn)"]
+    UserSessionWorkflow --> calculate_feedback["calculate_feedback (Activity)"]
 ```
 
 - **One workflow per game session** — cookie holds a session UUID, workflow ID = `wordle-{date}-{session_id}`
 - **No database** — the workflow's event history is the source of truth
-- **Deterministic daily word** — `random.seed(date.toordinal())` picks the same word for all players each day
+- **Daily or random mode** — daily mode uses `workflow.now()` + an activity; random mode uses `workflow.random()` for deterministic replay
+- **Fully playable via CLI** — the workflow is the complete game; the web UI is just a skin (see [Playing via Temporal CLI](#playing-via-temporal-cli))
 
 ## Prerequisites
 
@@ -92,7 +100,7 @@ uv sync
 just worker
 ```
 
-The worker connects to Temporal and polls for workflow tasks. It registers the `UserSessionWorkflow` and the `validate_guess` activity.
+The worker connects to Temporal and polls for workflow tasks. It registers the `UserSessionWorkflow` and all three activities.
 
 ### Terminal 3: Start the web server
 
@@ -104,13 +112,74 @@ Open **http://localhost:8000** in your browser and play.
 
 ### Configuration
 
-All settings are read from environment variables with sensible defaults for local development:
+Connection settings use Temporal's standard [`envconfig`](https://docs.temporal.io/develop/environment-configuration) system — environment variables, TOML profiles, or both. Defaults work for local development out of the box.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DURABLE_WORDLE_TEMPORAL_HOST` | `localhost:7233` | Temporal server address |
-| `DURABLE_WORDLE_TEMPORAL_NAMESPACE` | `default` | Temporal namespace |
-| `DURABLE_WORDLE_TEMPORAL_TASK_QUEUE` | `wordle-tasks` | Task queue name |
+| `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal server address |
+| `TEMPORAL_NAMESPACE` | `default` | Temporal namespace |
+| `TEMPORAL_TASK_QUEUE` | `wordle-tasks` | Task queue name (app-specific) |
+
+For Temporal Cloud, set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and `TEMPORAL_API_KEY` (or mTLS certs). See the [Temporal docs](https://docs.temporal.io/develop/python/temporal-client#connect-to-temporal-cloud) for details.
+
+## Playing via Temporal CLI
+
+The workflow is the complete game — you don't need the web UI. With a Temporal dev server and worker running, you can play entirely from the command line.
+
+### Start a game (random word)
+
+```bash
+temporal workflow start \
+  --type UserSessionWorkflow \
+  --task-queue wordle-tasks \
+  --workflow-id wordle-cli-game \
+  --input '{"session_id": "cli-test", "random_mode": true}'
+```
+
+### Make a guess
+
+```bash
+temporal workflow update \
+  --workflow-id wordle-cli-game \
+  --name make_guess \
+  --input '{"guess": "CRANE"}'
+```
+
+The response shows the feedback for each letter:
+
+```json
+{"word": "CRANE", "feedback": ["absent", "absent", "absent", "absent", "correct"]}
+```
+
+### Check the board
+
+```bash
+temporal workflow query \
+  --workflow-id wordle-cli-game \
+  --name get_game_state
+```
+
+Returns the full game state — target word, all guesses with feedback, status, and remaining guesses.
+
+### View the event history
+
+```bash
+temporal workflow show --workflow-id wordle-cli-game
+```
+
+Every step is visible: the word selection activity, each guess's validation and feedback activities, and the final game result.
+
+### Start a daily game (same word for everyone)
+
+```bash
+temporal workflow start \
+  --type UserSessionWorkflow \
+  --task-queue wordle-tasks \
+  --workflow-id wordle-daily-$(date +%Y-%m-%d)-player1 \
+  --input '{"session_id": "player1"}'
+```
+
+Omitting `random_mode` (or setting it to `false`) uses the daily word — determined by `workflow.now()` and an activity, so every player on the same day gets the same word.
 
 ## Development
 
