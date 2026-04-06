@@ -9,7 +9,7 @@
 | 3 | Word Lists & Validation Activity | Complete |
 | 4 | UserSessionWorkflow | Complete |
 | 5 | FastAPI API & Session Management | Complete |
-| 6 | Frontend Template (HTMX/Tailwind) | Not Started |
+| 6 | Frontend Template (HTMX/Tailwind) | Complete |
 | 7 | Worker & Docker Compose | Not Started |
 
 ## Architecture Overview

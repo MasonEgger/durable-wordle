@@ -38,11 +38,11 @@
 - [x] 5. Run `just check`
 
 ## Step 6: Frontend Template (HTMX/Tailwind)
-- [ ] 1. RED: Write template rendering tests (add to tests/test_api.py)
-- [ ] 2. GREEN: Create full templates/index.html (HTMX/Tailwind game UI)
-- [ ] 3. Add HTMX partial response support to api.py
-- [ ] 4. REFACTOR: Clean up template, accessibility
-- [ ] 5. Run `just check`
+- [x] 1. RED: Write template rendering tests (add to tests/test_api.py)
+- [x] 2. GREEN: Create full templates/index.html (HTMX/Tailwind game UI)
+- [x] 3. Add HTMX partial response support to api.py
+- [x] 4. REFACTOR: Clean up template, accessibility
+- [x] 5. Run `just check`
 
 ## Step 7: Worker & Docker Compose
 - [ ] 1. Create src/durable_wordle/worker.py

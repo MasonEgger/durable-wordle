@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.service import RPCError
 
-from durable_wordle.models import GameState
+from durable_wordle.models import GameState, GuessResult, LetterFeedback
 from durable_wordle.word_lists import get_daily_word
 from durable_wordle.workflows import (
     MakeGuessInput,
@@ -22,6 +22,40 @@ from durable_wordle.workflows import (
 )
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
+
+KEYBOARD_ROWS: list[list[str]] = [
+    ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+    ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+    ["Z", "X", "C", "V", "B", "N", "M"],
+]
+
+
+def _build_keyboard_state(
+    guesses: list[GuessResult],
+) -> dict[str, str]:
+    """Build a mapping of each letter to its best-known feedback state.
+
+    Priority: CORRECT > PRESENT > ABSENT. A letter that was CORRECT in any
+    guess stays green even if it was ABSENT in another.
+
+    :param guesses: The list of guess results so far.
+    :returns: A dict mapping uppercase letters to CSS class names.
+    """
+    letter_states: dict[str, str] = {}
+    priority = {"bg-green-500": 3, "bg-yellow-500": 2, "bg-gray-500": 1}
+    feedback_to_css = {
+        LetterFeedback.CORRECT: "bg-green-500",
+        LetterFeedback.PRESENT: "bg-yellow-500",
+        LetterFeedback.ABSENT: "bg-gray-500",
+    }
+    for guess in guesses:
+        for letter_index, letter_feedback in enumerate(guess.feedback):
+            letter = guess.word[letter_index]
+            css_class = feedback_to_css[letter_feedback]
+            current = letter_states.get(letter, "")
+            if priority.get(css_class, 0) > priority.get(current, 0):
+                letter_states[letter] = css_class
+    return letter_states
 
 
 def get_workflow_id(game_date: datetime.date, session_id: str) -> str:
@@ -97,10 +131,12 @@ def _render_board(
     game_state: GameState | None = None,
     error_message: str = "",
     status_message: str = "",
+    partial: bool = False,
 ) -> HTMLResponse:
     """Render the game board template with current state.
 
     Sets the session_id cookie on the response if this is a new session.
+    When ``partial`` is True, renders only the board partial for HTMX swaps.
 
     :param templates: Jinja2 template engine.
     :param request: The incoming HTTP request.
@@ -109,6 +145,7 @@ def _render_board(
     :param game_state: Current game state, or None for an empty board.
     :param error_message: Optional error message to display.
     :param status_message: Optional status message to display.
+    :param partial: If True, render only the board partial template.
     :returns: Rendered HTML response.
     """
     guesses = game_state.guesses if game_state else []
@@ -120,15 +157,24 @@ def _render_board(
         target = game_state.target_word
         status_message = status_message or f"Game over! The word was {target}."
 
+    keyboard_state = _build_keyboard_state(guesses)
+    max_guesses = game_state.max_guesses if game_state else 6
+    target_word = game_state.target_word if game_state else ""
+
+    template_name = "_board_partial.html" if partial else "index.html"
     context: dict[str, Any] = {
         "request": request,
         "guesses": guesses,
         "status": status,
+        "max_guesses": max_guesses,
+        "target_word": target_word,
         "error_message": error_message,
         "status_message": status_message,
+        "keyboard_rows": KEYBOARD_ROWS,
+        "keyboard_state": keyboard_state,
     }
     response = templates.TemplateResponse(
-        request=request, name="index.html", context=context
+        request=request, name=template_name, context=context
     )
     if is_new_session:
         response.set_cookie(key="session_id", value=session_id, httponly=True)
@@ -237,6 +283,7 @@ def create_app(
         # Query current state for rendering
         game_state = await _query_existing_game(client, workflow_id)
 
+        is_htmx = request.headers.get("HX-Request") == "true"
         return _render_board(
             templates,
             request,
@@ -244,6 +291,7 @@ def create_app(
             is_new_session,
             game_state=game_state,
             error_message=error_message,
+            partial=is_htmx,
         )
 
     return app

@@ -52,12 +52,16 @@ flowchart LR
 - **`config.py`**: Frozen `Settings` dataclass + `load_settings()` factory reading `DURABLE_WORDLE_*` env vars
 - **`models.py`**: `LetterFeedback` enum (CORRECT/PRESENT/ABSENT), `GuessResult`, `GameState` with `is_game_over` property
 - **`game_logic.py`**: `calculate_feedback(guess, target)` — two-pass algorithm (exact matches first, then remaining letters) handling duplicate letters correctly
+- **`workflows.py`**: `UserSessionWorkflow` — Update handler (`make_guess`), validator, Query handler (`get_game_state`), `wait_condition` for game over
+- **`activities.py`**: `validate_guess` sync activity — checks word against bundled list via `is_valid_guess`
+- **`api.py`**: `create_app()` factory — FastAPI app with cookie-based sessions, Temporal client lifecycle via lifespan (or direct injection for tests), routes: `GET /`, `POST /guess`, `GET /health`
 
 ## Temporal Constraints
 
 - Workflow code must be deterministic — no I/O, no `datetime.now()` (use `workflow.now()`), no `random` (use `workflow.random()`)
 - Import activities in workflows with `workflow.unsafe.imports_passed_through()`
 - Workflow and activity inputs use single dataclass pattern
+- Enums in workflow/activity data types must use `StrEnum` or `IntEnum` — the default data converter silently fails with `(str, Enum)`
 - Update validators must not mutate state or block
 - Sync activities require `ThreadPoolExecutor` on the worker
 
@@ -79,6 +83,6 @@ flowchart LR
 
 - **Workflow tests**: `WorkflowEnvironment.start_local()` with real activities, unique `uuid4()` task queues per test. Prefer real activities when they're lightweight (in-memory lookups); reserve mocks for activities with external dependencies (APIs, databases)
 - **Activity tests**: `ActivityEnvironment` for isolated activity testing. `validate_guess` is a sync activity, so `ActivityEnvironment.run()` returns directly — do not `await` it
-- **API tests**: FastAPI `TestClient` with test Temporal environment (fixtures in `tests/conftest.py`)
+- **API tests**: `httpx.AsyncClient` with `ASGITransport` + inline Workers per test (not fixture-based — ASGITransport doesn't trigger lifespan, and fixture workers cause event loop issues). Set `app.state` directly for test injection via `create_app(temporal_client=...)`
 - **Pure logic**: direct unit tests for `calculate_feedback` and word lists
 - pytest-asyncio with `asyncio_mode = "auto"`

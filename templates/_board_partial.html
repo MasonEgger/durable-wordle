@@ -1,0 +1,92 @@
+{% if error_message %}
+<div id="error-message" class="bg-red-800 text-white px-4 py-2 rounded text-sm w-full text-center" role="alert">
+    {{ error_message }}
+</div>
+{% endif %}
+
+{% if status_message %}
+<div id="status-message" class="bg-gray-700 text-white px-4 py-2 rounded text-sm w-full text-center" role="status">
+    {{ status_message }}
+</div>
+{% endif %}
+
+<div id="game-board" class="grid gap-1" role="grid" aria-label="Game board">
+    {% for guess in guesses %}
+    <div class="guess-row flex gap-1" role="row">
+        {% for letter_index in range(guess.feedback | length) %}
+        {% set feedback_class = {
+            "correct": "bg-green-500",
+            "present": "bg-yellow-500",
+            "absent": "bg-gray-500"
+        }[guess.feedback[letter_index].value] %}
+        <div class="w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-2xl font-bold rounded {{ feedback_class }} border border-gray-600"
+             role="gridcell"
+             aria-label="{{ guess.word[letter_index] }}, {{ guess.feedback[letter_index].value }}">
+            {{ guess.word[letter_index] }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+
+    {% for empty_row_index in range(max_guesses - guesses | length) %}
+    <div class="guess-row flex gap-1" role="row">
+        {% for empty_col_index in range(5) %}
+        <div class="w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-2xl font-bold rounded border-2 border-gray-600 bg-gray-800"
+             role="gridcell" aria-label="Empty">
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+
+{% if status == "playing" %}
+<form hx-post="/guess" hx-target="#game-content" hx-swap="innerHTML" class="w-full flex gap-2 justify-center">
+    <label for="guess-input" class="sr-only">Your guess</label>
+    <input
+        type="text"
+        id="guess-input"
+        name="guess"
+        maxlength="5"
+        autocomplete="off"
+        autofocus
+        required
+        class="w-48 px-4 py-2 text-center text-xl font-bold uppercase tracking-widest bg-gray-800 border-2 border-gray-600 rounded text-white focus:border-green-500 focus:outline-none"
+        aria-label="Enter your 5-letter guess"
+        placeholder="GUESS"
+    >
+    <button
+        type="submit"
+        class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors"
+        aria-label="Submit guess"
+    >
+        Enter
+    </button>
+</form>
+{% endif %}
+
+{% if status in ["won", "lost"] %}
+<button
+    id="share-button"
+    onclick="shareResults()"
+    class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors"
+    aria-label="Share your results"
+>
+    Share Results
+</button>
+<span id="share-confirmation" class="text-sm text-gray-400 hidden">Copied to clipboard!</span>
+{% endif %}
+
+<div id="keyboard" class="w-full flex flex-col items-center gap-1 mt-2" aria-label="On-screen keyboard">
+    {% for row in keyboard_rows %}
+    <div class="flex gap-1">
+        {% for key in row %}
+        {% set key_class = keyboard_state.get(key, "bg-gray-700") %}
+        <button
+            class="keyboard-key w-8 h-12 sm:w-10 sm:h-12 flex items-center justify-center text-sm font-bold rounded {{ key_class }} border border-gray-600 hover:brightness-110 transition-all"
+            data-key="{{ key }}"
+            aria-label="{{ key }}"
+        >{{ key }}</button>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>

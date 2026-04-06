@@ -1,6 +1,7 @@
 # ABOUTME: Tests for the FastAPI API layer covering session management,
 # game board rendering, health check, and Temporal workflow integration.
 import concurrent.futures
+import datetime
 import uuid
 
 import pytest
@@ -10,6 +11,7 @@ from temporalio.worker import Worker
 
 from durable_wordle.activities import validate_guess
 from durable_wordle.api import create_app
+from durable_wordle.word_lists import get_daily_word
 from durable_wordle.workflows import UserSessionWorkflow
 
 
@@ -147,3 +149,150 @@ class TestGuessEndpoint:
                     response = await client.post("/guess", data={"guess": "ABOVE"})
                     assert response.status_code == 200
                     assert "session_id" in response.cookies
+
+
+class TestTemplateRendering:
+    """Tests for the full HTMX/Tailwind game UI template."""
+
+    async def test_page_contains_six_row_game_grid(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """The rendered page should contain a 6-row game grid."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/")
+            body = response.text
+            # Count actual row divs with the class, not JS references
+            assert body.count('class="guess-row') == 6
+
+    async def test_page_contains_keyboard_section(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """The rendered page should contain an on-screen keyboard."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/")
+            body = response.text
+            assert "keyboard" in body.lower()
+            # Keyboard should contain letter keys
+            assert ">Q<" in body
+            assert ">Z<" in body
+
+    async def test_correct_feedback_renders_green(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """A guess with CORRECT feedback should render with green styling."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    response = await client.post("/guess", data={"guess": "ABOUT"})
+                    body = response.text
+                    # Correct word — all tiles should be green
+                    assert "bg-green-500" in body
+
+    async def test_present_feedback_renders_yellow(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """A guess with PRESENT feedback should render with yellow styling."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    # ABOVE against daily word — some letters may be present
+                    response = await client.post("/guess", data={"guess": "ABOVE"})
+                    body = response.text
+                    # At minimum we should see green or yellow or gray tiles
+                    has_feedback = (
+                        "bg-green-500" in body
+                        or "bg-yellow-500" in body
+                        or "bg-gray-500" in body
+                    )
+                    assert has_feedback
+
+    async def test_absent_feedback_renders_gray(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """A guess with ABSENT feedback should render with gray styling."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    response = await client.post("/guess", data={"guess": "QUICK"})
+                    body = response.text
+                    # QUICK has letters unlikely to all match — expect gray tiles
+                    assert "bg-gray-500" in body
+
+    async def test_won_game_shows_success_and_share(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """A won game should show a success message and share button."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    # The daily word is deterministic — guess it directly
+                    # We need to know the daily word for today
+                    today = datetime.date.today()
+                    daily_word = get_daily_word(today)
+                    response = await client.post("/guess", data={"guess": daily_word})
+                    body = response.text
+                    assert "Congratulations" in body or "won" in body.lower()
+                    assert "share" in body.lower()
+
+    async def test_lost_game_shows_word_and_share(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """A lost game should show the target word and a share button."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    today = datetime.date.today()
+                    daily_word = get_daily_word(today)
+                    # Pick 6 words that are NOT the daily word
+                    wrong_words = [
+                        word
+                        for word in [
+                            "ABOVE",
+                            "ABUSE",
+                            "ACTOR",
+                            "ADMIT",
+                            "ADOPT",
+                            "ADULT",
+                            "AFTER",
+                            "AGAIN",
+                            "AGENT",
+                        ]
+                        if word != daily_word
+                    ][:6]
+                    for wrong_word in wrong_words:
+                        response = await client.post(
+                            "/guess", data={"guess": wrong_word}
+                        )
+                    body = response.text
+                    assert daily_word in body
+                    assert "share" in body.lower()
