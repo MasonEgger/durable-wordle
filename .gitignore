@@ -1,6 +1,9 @@
 # AI Files
 commit-msg.md
 
+# Temporal dev server state
+temporal.db
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

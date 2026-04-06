@@ -1,12 +1,13 @@
 services:
   temporal:
-    image: temporalio/auto-setup:latest
+    image: temporalio/temporal:latest
+    command: server start-dev --ip 0.0.0.0 --db-filename /data/temporal.db
     ports:
       - "7233:7233"
       - "8233:8233"
-    environment:
-      - DB=sqlite
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ./temporal.db:/data/temporal.db
+    restart: unless-stopped
 
   worker:
     build: .
