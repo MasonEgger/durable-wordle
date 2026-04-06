@@ -7,7 +7,7 @@
 | 1 | Project Scaffolding & Configuration | Complete |
 | 2 | Models & Game Logic | Complete |
 | 3 | Word Lists & Validation Activity | Complete |
-| 4 | UserSessionWorkflow | Not Started |
+| 4 | UserSessionWorkflow | Complete |
 | 5 | FastAPI API & Session Management | Not Started |
 | 6 | Frontend Template (HTMX/Tailwind) | Not Started |
 | 7 | Worker & Docker Compose | Not Started |

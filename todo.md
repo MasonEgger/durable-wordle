@@ -25,10 +25,10 @@
 - [x] 6. Run `just check`
 
 ## Step 4: UserSessionWorkflow
-- [ ] 1. RED: Write workflow tests (tests/test_workflows.py)
-- [ ] 2. GREEN: Create src/durable_wordle/workflows.py (UserSessionWorkflow)
-- [ ] 3. REFACTOR: Clean workflow logic
-- [ ] 4. Run `just check`
+- [x] 1. RED: Write workflow tests (tests/test_workflows.py)
+- [x] 2. GREEN: Create src/durable_wordle/workflows.py (UserSessionWorkflow)
+- [x] 3. REFACTOR: Clean workflow logic
+- [x] 4. Run `just check`
 
 ## Step 5: FastAPI API & Session Management
 - [ ] 1. Create minimal templates/index.html placeholder

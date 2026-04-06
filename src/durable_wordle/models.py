@@ -4,7 +4,7 @@ import enum
 from dataclasses import dataclass, field
 
 
-class LetterFeedback(enum.Enum):
+class LetterFeedback(enum.StrEnum):
     """Feedback for a single letter in a guess.
 
     :cvar CORRECT: Letter is in the correct position (green).
