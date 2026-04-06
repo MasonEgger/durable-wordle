@@ -1,6 +1,7 @@
 # ABOUTME: FastAPI web layer connecting browsers to Temporal workflows.
 # Handles session cookies, game board rendering, and Temporal client lifecycle.
 import datetime
+import json
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -9,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.service import RPCError
@@ -23,7 +25,9 @@ from durable_wordle.models import (
 )
 from durable_wordle.workflow import UserSessionWorkflow
 
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+TEMPLATES_DIR = PROJECT_ROOT / "templates"
+STATIC_DIR = PROJECT_ROOT / "static"
 
 KEYBOARD_ROWS: list[list[str]] = [
     ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
@@ -44,11 +48,11 @@ def _build_keyboard_state(
     :returns: A dict mapping uppercase letters to CSS class names.
     """
     letter_states: dict[str, str] = {}
-    priority = {"bg-green-500": 3, "bg-yellow-500": 2, "bg-gray-500": 1}
+    priority = {"bg-green-500": 3, "bg-yellow-500": 2, "bg-gray-900": 1}
     feedback_to_css = {
         LetterFeedback.CORRECT: "bg-green-500",
         LetterFeedback.PRESENT: "bg-yellow-500",
-        LetterFeedback.ABSENT: "bg-gray-500",
+        LetterFeedback.ABSENT: "bg-gray-900",
     }
     for guess in guesses:
         for letter_index, letter_feedback in enumerate(guess.feedback):
@@ -58,6 +62,24 @@ def _build_keyboard_state(
             if priority.get(css_class, 0) > priority.get(current, 0):
                 letter_states[letter] = css_class
     return letter_states
+
+
+def _friendly_error(raw_error: str) -> str:
+    """Convert raw Temporal error messages into user-friendly text.
+
+    :param raw_error: The raw error string from an RPC or update error.
+    :returns: A user-friendly error message.
+    """
+    lower = raw_error.lower()
+    if "not a valid word" in lower or "invalidword" in lower:
+        return "Not in word list"
+    if "game is already over" in lower or "gameover" in lower:
+        return "Game is already over"
+    if "must be exactly 5 letters" in lower or "invalidformat" in lower:
+        return "Word must be 5 letters"
+    if "must contain only letters" in lower:
+        return "Letters only"
+    return "Something went wrong — try again"
 
 
 def get_workflow_id(
@@ -145,6 +167,7 @@ def _render_board(
     error_message: str = "",
     status_message: str = "",
     partial: bool = False,
+    random_mode: bool = False,
 ) -> HTMLResponse:
     """Render the game board template with current state.
 
@@ -175,6 +198,7 @@ def _render_board(
     target_word = game_state.target_word if game_state else ""
 
     template_name = "_board_partial.html" if partial else "index.html"
+    has_started = len(guesses) > 0
     context: dict[str, Any] = {
         "request": request,
         "guesses": guesses,
@@ -185,6 +209,9 @@ def _render_board(
         "status_message": status_message,
         "keyboard_rows": KEYBOARD_ROWS,
         "keyboard_state": keyboard_state,
+        "random_mode": random_mode,
+        "has_started": has_started,
+        "animate": partial,
     }
     response = templates.TemplateResponse(
         request=request, name=template_name, context=context
@@ -222,6 +249,7 @@ def create_app(
         yield
 
     app = FastAPI(title="Durable Wordle", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
     @app.get("/health")
@@ -231,6 +259,21 @@ def create_app(
         :returns: A dict with ``status`` key.
         """
         return {"status": "ok"}
+
+    @app.get("/new-game")
+    async def new_game() -> RedirectResponse:
+        """Start a new random game by clearing cookies and redirecting.
+
+        Sets a fresh game_id and clears the session_id so the player
+        gets a completely new workflow.
+
+        :returns: A redirect to the home page with fresh cookies.
+        """
+        response = RedirectResponse(url="/", status_code=302)
+        new_game_id = str(uuid.uuid4())
+        response.set_cookie(key="game_id", value=new_game_id, httponly=True)
+        response.delete_cookie(key="session_id")
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
@@ -254,7 +297,12 @@ def create_app(
         game_state = await _query_existing_game(client, workflow_id)
 
         return _render_board(
-            templates, request, session_id, is_new_session, game_state=game_state
+            templates,
+            request,
+            session_id,
+            is_new_session,
+            game_state=game_state,
+            random_mode=game_id is not None,
         )
 
     @app.post("/guess", response_class=HTMLResponse)
@@ -303,14 +351,32 @@ def create_app(
                 MakeGuessInput(guess=guess.strip().upper()),
             )
         except RPCError as rpc_err:
-            error_message = str(rpc_err)
+            error_message = _friendly_error(str(rpc_err))
         except Exception as update_err:
-            error_message = str(update_err)
+            # WorkflowUpdateFailedError wraps the cause — dig it out
+            cause = update_err.__cause__ or update_err
+            error_message = _friendly_error(str(cause))
+
+        is_htmx = request.headers.get("HX-Request") == "true"
+
+        # On error for HTMX requests, return 422 with error trigger
+        # so the client can show a toast without replacing the board
+        if error_message and is_htmx:
+            error_response = HTMLResponse(content="", status_code=422)
+            error_response.headers["HX-Trigger"] = json.dumps(
+                {"guessError": error_message}
+            )
+            if is_new_session:
+                error_response.set_cookie(
+                    key="session_id", value=session_id, httponly=True
+                )
+            if random_mode and game_id:
+                error_response.set_cookie(key="game_id", value=game_id, httponly=True)
+            return error_response
 
         # Query current state for rendering
         game_state = await _query_existing_game(client, workflow_id)
 
-        is_htmx = request.headers.get("HX-Request") == "true"
         response = _render_board(
             templates,
             request,
@@ -319,6 +385,7 @@ def create_app(
             game_state=game_state,
             error_message=error_message,
             partial=is_htmx,
+            random_mode=random_mode,
         )
         if random_mode and game_id:
             response.set_cookie(key="game_id", value=game_id, httponly=True)
@@ -338,9 +405,13 @@ def create_production_app() -> FastAPI:
 
     :returns: A configured FastAPI application instance.
     """
-    from temporalio.envconfig import ClientConfig
+    from pathlib import Path
 
-    connect_config = ClientConfig.load_client_connect_config()
+    from temporalio.envconfig import ClientConfigProfile
+
+    config_file = Path(__file__).resolve().parent.parent.parent / "temporal.toml"
+    profile = ClientConfigProfile.load(config_source=config_file)
+    connect_config = profile.to_client_connect_config()
     return create_app(
         temporal_url=connect_config.get("target_host", "localhost:7233"),
         temporal_namespace=connect_config.get("namespace", "default"),

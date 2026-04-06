@@ -45,17 +45,19 @@ flowchart LR
 ```
 
 - **One workflow per game session**: cookie holds session_id (UUID), workflow ID = `wordle-{date}-{session_id}` (daily) or `wordle-random-{game_id}` (random)
-- **Two game modes**: daily (default, `workflow.now()` + `select_daily_word` activity) and random (`workflow.random().choice()`)
+- **Two game modes**: daily (default, `workflow.now()` + `select_word` activity) and random (same activity, no date → `random.choice()`)
 - **Update handler** (`make_guess`): waits for init, validates via activity, computes feedback via activity, mutates state, returns result
-- **Update validator**: synchronous read-only guard — rejects if game over, wrong length, or non-alphabetic. Cannot call activities or mutate state
+- **Update validator**: synchronous read-only guard — rejects if game over, wrong length, or non-alphabetic. Format validation lives here, not in activities.
 - **Query handler** (`get_game_state`): returns current board state for rendering (read-only)
-- **Three activities**: `select_daily_word` (word selection), `validate_guess` (dictionary check), `calculate_feedback` (green/yellow/gray feedback) — all sync, all appear in event history
+- **Three activities**: `select_word` (word selection — daily or random), `validate_guess` (external dictionary API via `requests`), `calculate_feedback` (green/yellow/gray feedback) — all sync, all appear in event history
+- **HTMX error flow**: on invalid word, API returns 422 + `HX-Trigger` header — client JS shows toast + shake without replacing the board
+- **Play again**: `GET /new-game` clears httpOnly cookies server-side and redirects — JS cannot modify httpOnly cookies
 
 ## Key Modules
 
-- **`models.py`**: `LetterFeedback` enum (CORRECT/PRESENT/ABSENT), `GuessResult`, `GameState`, `WorkflowInput` (session_id + random_mode), `MakeGuessInput`, `ValidateGuessInput`, `SelectDailyWordInput`, `CalculateFeedbackInput`
-- **`workflow.py`**: `UserSessionWorkflow` — `run()` selects word then waits, `make_guess` Update handler with `wait_condition` guard for init race, `validate_make_guess` validator, `get_game_state` Query handler
-- **`activities.py`**: Three sync activities — `validate_guess` (word list check), `select_daily_word` (date-seeded selection), `calculate_feedback` (two-pass green/yellow/gray algorithm with duplicate-letter handling)
+- **`models.py`**: `LetterFeedback` enum (CORRECT/PRESENT/ABSENT), `GuessResult`, `GameState`, `WorkflowInput` (session_id + random_mode), `MakeGuessInput`, `ValidateGuessInput`, `SelectWordInput`, `CalculateFeedbackInput`
+- **`workflow.py`**: `UserSessionWorkflow` — `run()` selects word via activity then waits, `make_guess` Update handler with `wait_condition` guard for init race, `validate_make_guess` validator, `get_game_state` Query handler
+- **`activities.py`**: Three sync activities — `validate_guess` (dictionary API via `requests`, Temporal retries on failure), `select_word` (daily date-seeded or random selection), `calculate_feedback` (two-pass green/yellow/gray algorithm with duplicate-letter handling)
 - **`api.py`**: `create_app()` factory — FastAPI with cookie sessions, Temporal client lifecycle via lifespan (or direct injection for tests), routes: `GET /`, `POST /guess`, `GET /health`. `create_production_app()` uses `temporalio.envconfig` for connection settings
 - **`worker.py`**: Temporal worker entry point — connects via `temporalio.envconfig`, registers workflow and all three activities, uses `ThreadPoolExecutor` for sync activities
 
@@ -67,6 +69,8 @@ flowchart LR
 - Enums in workflow/activity data types must use `StrEnum` or `IntEnum` — the default data converter silently fails with `(str, Enum)`
 - Update validators must not mutate state, must not block, cannot be async, cannot call activities
 - When workflow has async initialization (activity call before `wait_condition`), update handlers must guard with `await workflow.wait_condition(lambda: self._game_state is not None)`
+- `WorkflowUpdateFailedError` wraps the real error in `__cause__` — use `str(err.__cause__)` to extract the actual `ApplicationError` message
+- For `temporalio.envconfig`, use `ClientConfigProfile.load(config_source=Path(...))` — `str` is treated as TOML content, `Path` as a file path. Project uses `temporal.toml` at repo root
 - Sync activities require `ThreadPoolExecutor` on the worker
 
 ## Code Conventions
@@ -89,4 +93,6 @@ flowchart LR
 - **Activity tests**: `ActivityEnvironment` for isolated activity testing. All activities are sync, so `ActivityEnvironment.run()` returns directly — do not `await` it
 - **API tests**: `httpx.AsyncClient` with `ASGITransport` + inline Workers per test (not fixture-based — ASGITransport doesn't trigger lifespan, and fixture workers cause event loop issues). Set `app.state` directly for test injection via `create_app(temporal_client=...)`
 - **Game logic tests**: `test_game_logic.py` tests `calculate_feedback` via `ActivityEnvironment` (9 tests covering duplicates, case handling, etc.)
+- **Dictionary API mock**: `autouse=True` fixture in `conftest.py` patches `requests.get` globally — returns 200 for bundled word list words, 404 otherwise. Prevents rate limiting from the external API
+- **Post-completion updates**: Sending an update to a completed workflow raises `RPCError` (not `WorkflowUpdateFailedError`) — catch both when testing
 - pytest-asyncio with `asyncio_mode = "auto"`

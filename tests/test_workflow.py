@@ -11,7 +11,7 @@ from temporalio.worker import Worker
 
 from durable_wordle.activities import (
     calculate_feedback,
-    select_daily_word,
+    select_word,
     validate_guess,
 )
 from durable_wordle.models import LetterFeedback, MakeGuessInput, WorkflowInput
@@ -40,7 +40,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_daily_word, validate_guess],
+                activities=[calculate_feedback, select_word, validate_guess],
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -72,7 +72,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_daily_word, validate_guess],
+                activities=[calculate_feedback, select_word, validate_guess],
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -98,7 +98,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_daily_word, validate_guess],
+                activities=[calculate_feedback, select_word, validate_guess],
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -123,7 +123,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_daily_word, validate_guess],
+                activities=[calculate_feedback, select_word, validate_guess],
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -148,7 +148,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_daily_word, validate_guess],
+                activities=[calculate_feedback, select_word, validate_guess],
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -187,7 +187,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_daily_word, validate_guess],
+                activities=[calculate_feedback, select_word, validate_guess],
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -228,7 +228,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_daily_word, validate_guess],
+                activities=[calculate_feedback, select_word, validate_guess],
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -266,13 +266,13 @@ class TestUserSessionWorkflow:
     async def test_daily_mode_uses_activity(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
-        """Daily mode should select word via the select_daily_word activity."""
+        """Daily mode should select word via the select_word activity."""
         with concurrent.futures.ThreadPoolExecutor() as executor:
             async with Worker(
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_daily_word, validate_guess],
+                activities=[calculate_feedback, select_word, validate_guess],
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(

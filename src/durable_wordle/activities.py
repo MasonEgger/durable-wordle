@@ -1,49 +1,68 @@
-# ABOUTME: Temporal activities for Durable Wordle. Contains word validation,
-# daily word selection, and guess feedback calculation.
+# ABOUTME: Temporal activities for Durable Wordle. Contains word validation
+# via dictionary API, word selection, and guess feedback calculation.
 import datetime
+import random
 from collections import Counter
 
+import requests
 from temporalio import activity
 
 from durable_wordle.models import (
     CalculateFeedbackInput,
     LetterFeedback,
-    SelectDailyWordInput,
+    SelectWordInput,
     ValidateGuessInput,
 )
-from durable_wordle.word_lists import get_daily_word, is_valid_guess
+from durable_wordle.word_lists import ANSWER_LIST, get_daily_word
+
+DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en"
 
 
 @activity.defn
 def validate_guess(activity_input: ValidateGuessInput) -> bool:
-    """Check whether a guess is a valid 5-letter word from the word list.
+    """Check whether a guess is a real English word via dictionary API.
 
-    Normalizes the guess to uppercase, checks length and alphabetic
-    characters, then verifies membership in the valid guesses set.
+    The update validator already rejects wrong length and non-alphabetic
+    guesses before this activity runs. This activity only checks the
+    external dictionary.
 
     :param activity_input: The activity input containing the guess word.
-    :returns: ``True`` if the guess is a valid 5-letter word.
+    :returns: ``True`` if the guess is a real English word.
     """
     normalized = activity_input.guess.strip().upper()
-    if len(normalized) != 5:
-        return False
-    if not normalized.isalpha():
-        return False
-    return is_valid_guess(normalized)
+    response = requests.get(
+        f"{DICTIONARY_API_URL}/{normalized.lower()}",
+        timeout=5,
+    )
+    is_valid: bool = response.status_code == 200
+    activity.logger.info(
+        "validate_guess: %s → %s (status=%d)",
+        normalized,
+        "valid" if is_valid else "invalid",
+        response.status_code,
+    )
+    return is_valid
 
 
 @activity.defn
-def select_daily_word(activity_input: SelectDailyWordInput) -> str:
-    """Select the daily target word for a given date.
+def select_word(activity_input: SelectWordInput) -> str:
+    """Select the target word for a game.
 
-    Uses deterministic seeding so every player gets the same word
-    on the same calendar day.
+    If ``game_date`` is provided, uses deterministic date-seeded selection
+    so every player gets the same word on the same day. Otherwise, picks
+    a random word from the answer list.
 
-    :param activity_input: The activity input containing an ISO date string.
-    :returns: The daily target word in uppercase.
+    :param activity_input: Contains an optional ISO date string.
+    :returns: The target word in uppercase.
     """
-    game_date = datetime.date.fromisoformat(activity_input.game_date)
-    return get_daily_word(game_date)
+    if activity_input.game_date:
+        game_date = datetime.date.fromisoformat(activity_input.game_date)
+        word = get_daily_word(game_date)
+        activity.logger.info("select_word: daily, date=%s → %s", game_date, word)
+    else:
+        word = random.choice(ANSWER_LIST)
+        activity.logger.info("select_word: random → %s", word)
+    return word
 
 
 @activity.defn
@@ -88,8 +107,14 @@ def calculate_feedback(
         else:
             feedback[position] = LetterFeedback.ABSENT
 
-    return [
-        letter_feedback
-        for letter_feedback in feedback
-        if letter_feedback is not None
+    result = [
+        letter_feedback for letter_feedback in feedback if letter_feedback is not None
     ]
+    feedback_summary = "".join(fb.value[0].upper() for fb in result)
+    activity.logger.info(
+        "calculate_feedback: %s vs %s → %s",
+        normalized_guess,
+        normalized_target,
+        feedback_summary,
+    )
+    return result

@@ -8,7 +8,7 @@ from temporalio.exceptions import ApplicationError
 with workflow.unsafe.imports_passed_through():
     from durable_wordle.activities import (
         calculate_feedback,
-        select_daily_word,
+        select_word,
         validate_guess,
     )
     from durable_wordle.models import (
@@ -17,11 +17,10 @@ with workflow.unsafe.imports_passed_through():
         GuessResult,
         LetterFeedback,
         MakeGuessInput,
-        SelectDailyWordInput,
+        SelectWordInput,
         ValidateGuessInput,
         WorkflowInput,
     )
-    from durable_wordle.word_lists import ANSWER_LIST
 
 
 @workflow.defn
@@ -56,22 +55,33 @@ class UserSessionWorkflow:
         :param workflow_input: Contains session ID and game mode.
         :returns: The final game state when the game is over.
         """
-        if workflow_input.random_mode:
-            target_word = workflow.random().choice(ANSWER_LIST)
-        else:
-            game_date = workflow.now().date().isoformat()
-            target_word = await workflow.execute_activity(
-                select_daily_word,
-                SelectDailyWordInput(game_date=game_date),
-                start_to_close_timeout=timedelta(seconds=10),
-            )
+        game_date = (
+            "" if workflow_input.random_mode else workflow.now().date().isoformat()
+        )
+        mode_label = "random" if workflow_input.random_mode else f"daily ({game_date})"
+        workflow.logger.info("Selecting word: %s", mode_label)
+        target_word = await workflow.execute_activity(
+            select_word,
+            SelectWordInput(game_date=game_date),
+            start_to_close_timeout=timedelta(seconds=10),
+        )
         self._game_state = GameState(target_word=target_word)
+        workflow.logger.info(
+            "Game initialized (session=%s, mode=%s)",
+            workflow_input.session_id,
+            "random" if workflow_input.random_mode else "daily",
+        )
 
         await workflow.wait_condition(lambda: self._state.is_game_over)
 
         # Ensure all in-flight update handlers finish before completing
         await workflow.wait_condition(workflow.all_handlers_finished)
 
+        workflow.logger.info(
+            "Game completed: %s in %d guesses",
+            self._state.status,
+            len(self._state.guesses),
+        )
         return self._state
 
     @workflow.update
@@ -90,6 +100,13 @@ class UserSessionWorkflow:
         await workflow.wait_condition(lambda: self._game_state is not None)
 
         normalized_guess = guess_input.guess.strip().upper()
+        guess_number = len(self._state.guesses) + 1
+        workflow.logger.info(
+            "Guess %d/%d: %s",
+            guess_number,
+            self._state.max_guesses,
+            normalized_guess,
+        )
 
         # Execute validate_guess activity to check word list
         is_valid = await workflow.execute_activity(
@@ -98,6 +115,7 @@ class UserSessionWorkflow:
             start_to_close_timeout=timedelta(seconds=10),
         )
         if not is_valid:
+            workflow.logger.warning("Rejected invalid word: %s", normalized_guess)
             raise ApplicationError(
                 f"'{normalized_guess}' is not a valid word",
                 type="InvalidWord",
@@ -116,13 +134,18 @@ class UserSessionWorkflow:
         guess_result = GuessResult(word=normalized_guess, feedback=feedback)
         self._state.guesses.append(guess_result)
 
+        feedback_summary = "".join(fb.value[0].upper() for fb in feedback)
+        workflow.logger.info("Feedback for %s: %s", normalized_guess, feedback_summary)
+
         # Check win condition
         if all(letter == LetterFeedback.CORRECT for letter in feedback):
             self._state.status = "won"
+            workflow.logger.info("Player won on guess %d!", guess_number)
 
         # Check loss condition
         elif len(self._state.guesses) >= self._state.max_guesses:
             self._state.status = "lost"
+            workflow.logger.info("Player lost — word was %s", self._state.target_word)
 
         return guess_result
 

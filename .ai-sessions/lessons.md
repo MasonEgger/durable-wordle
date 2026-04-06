@@ -3,16 +3,16 @@
 ## Recent
 <!-- 10 most recent lessons, newest first -->
 
+- When cookies are set with `httponly=True`, JS cannot read or clear them — use a server route for cookie management (e.g., `/new-game` that sets/deletes cookies and redirects) (2026-04-06)
+- For `temporalio.envconfig`, use `ClientConfigProfile.load(config_source=Path(...))` with a project-local TOML file — `str` arg is treated as TOML content, `Path` as a file path (2026-04-06)
+- When mocking external APIs in tests with a session-scoped Temporal test server, use `autouse=True` fixture in `conftest.py` to avoid rate limiting across all test files (2026-04-06)
+- For HTMX error handling, return 422 + `HX-Trigger` header instead of swapping the board — client JS catches the event for toasts/shake without losing current state (2026-04-06)
+- `WorkflowUpdateFailedError` wraps the real error in `__cause__` — use `str(err.__cause__)` not `str(err)` to get the actual message (2026-04-06)
 - When promoting a pure function to a Temporal activity, inline the logic rather than wrapping — avoids an extra file and indirection layer (2026-04-06)
 - Never run multiple pytest processes in background when tests use a session-scoped Temporal test server — zombie servers cause all subsequent test runs to hang (2026-04-06)
 - When a workflow has async initialization (activity in `run()` before `wait_condition`), add `await workflow.wait_condition(lambda: state is not None)` at the top of update handlers to prevent update-before-init races (2026-04-06)
-- Use `temporalio.envconfig.ClientConfig.load_client_connect_config()` instead of custom config modules — reads standard `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE` env vars and TOML profiles (2026-04-06)
-- Update validators cannot be async, cannot mutate state, and cannot call activities — they are read-only guards that reject by raising exceptions. No `WorkflowExecutionUpdateAccepted` event is written on rejection (2026-04-06)
+- Update validators cannot be async, cannot mutate state, and cannot call activities — they are read-only guards that reject by raising exceptions (2026-04-06)
 - For educational Temporal demos, wrap pure functions as activities when you want each step visible in the event history — observability value outweighs the minor overhead (2026-04-06)
-- Use `workflow.random()` for deterministic random in workflows and `workflow.now()` for deterministic time — both are replay-safe (2026-04-06)
-- For HTMX partial templates, use `{% include %}` in the full template and render the included file directly for partial responses — cleaner than Jinja2 block inheritance (2026-04-06)
-- When testing FastAPI with `httpx.ASGITransport`, set `app.state` directly — the lifespan context manager is NOT triggered by ASGITransport (2026-04-06)
-- For Temporal API integration tests, use inline Workers per test (not async fixture workers) — ASGITransport and fixture-based workers have event loop cooperation issues that cause hanging (2026-04-06)
 
 ## Categories
 <!-- Lessons organized by topic -->
@@ -27,7 +27,8 @@
 - When a workflow has async init (activity in `run()`), add `wait_condition` guards in update handlers to prevent update-before-init races (2026-04-06)
 - Update validators cannot be async, cannot mutate state, cannot call activities — they're read-only guards that reject by raising exceptions (2026-04-06)
 - Use `workflow.random()` for deterministic random and `workflow.now()` for deterministic time — both are replay-safe (2026-04-06)
-- Use `temporalio.envconfig.ClientConfig.load_client_connect_config()` instead of custom config — reads standard `TEMPORAL_ADDRESS`/`TEMPORAL_NAMESPACE` env vars (2026-04-06)
+- For `temporalio.envconfig`, use `ClientConfigProfile.load(config_source=Path(...))` with a project-local TOML file — `str` is TOML content, `Path` is a file path (2026-04-06)
+- `WorkflowUpdateFailedError` wraps the real error in `__cause__` — use `str(err.__cause__)` to get the actual message (2026-04-06)
 
 ### FastAPI / Testing
 - When testing FastAPI with `httpx.ASGITransport`, set `app.state` directly — the lifespan context manager is NOT triggered by ASGITransport (2026-04-06)
@@ -57,9 +58,12 @@
 - When Temporal workflow tests hang, run with `-s` and check worker stderr for "Failing workflow task" messages — the real error is often a serialization failure, not a deadlock (2026-04-06)
 - When testing HTML for element counts by class name, use `class="guess-row` not just `guess-row` — the bare string also matches JS/CSS references (2026-04-06)
 - Never run multiple pytest processes in background when tests use a session-scoped Temporal test server — zombie servers cause all subsequent runs to hang (2026-04-06)
+- When mocking external APIs in tests with session-scoped fixtures, use `autouse=True` in `conftest.py` — prevents rate limiting across all test files (2026-04-06)
 
 ### Frontend
 - For HTMX partial templates, use `{% include %}` in the full template and render the included file directly for partial responses — cleaner than Jinja2 block inheritance (2026-04-06)
+- For HTMX error handling, return 422 + `HX-Trigger` header — client JS catches the event for toasts/shake without replacing the board (2026-04-06)
+- When cookies are `httponly=True`, JS cannot modify them — use a server route (e.g., `/new-game`) to set/delete cookies and redirect (2026-04-06)
 
 ### Docker
 - `temporalio/auto-setup` is deprecated — use `temporalio/temporal:latest` with command `server start-dev --ip 0.0.0.0` (the image entrypoint is already `temporal`, don't repeat it) (2026-04-06)

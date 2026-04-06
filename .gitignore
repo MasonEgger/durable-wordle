@@ -1,6 +1,10 @@
 # AI Files
 commit-msg.md
 
+# Playwright MCP artifacts
+.playwright-mcp/
+debug-*.png
+
 # Temporal dev server state
 temporal.db
 

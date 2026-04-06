@@ -86,13 +86,14 @@ class ValidateGuessInput:
 
 
 @dataclass
-class SelectDailyWordInput:
-    """Input for the select_daily_word activity.
+class SelectWordInput:
+    """Input for the select_word activity.
 
-    :param game_date: ISO-format date string for deterministic word selection.
+    :param game_date: ISO-format date string for daily word. If empty,
+        a random word is selected instead.
     """
 
-    game_date: str
+    game_date: str = ""
 
 
 @dataclass
