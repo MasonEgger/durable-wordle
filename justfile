@@ -1,26 +1,21 @@
-# Justfile for demo-wordle
-
-install:
-    uv sync
-
-check:
-    uv run ruff format --check src/ tests/
-    uv run ruff check src/ tests/
-    uv run pyright src/ tests/
-    uv run pytest -v
-
-fmt:
-    uv run ruff format src/ tests/
-    uv run ruff check --fix src/ tests/
-
-test:
-    uv run pytest -v
+# Durable Wordle task runner
 
 worker:
-    uv run python -m demo_wordle.worker
+    uv run python -m durable_wordle.worker
 
-api:
-    uv run uvicorn demo_wordle.api:app --reload
+server:
+    uv run uvicorn --factory durable_wordle.api:create_production_app --reload
 
-start-game:
-    uv run python -m demo_wordle.start_game
+test:
+    uv run pytest
+
+lint:
+    uv run ruff check src/ tests/
+
+format:
+    uv run ruff format src/ tests/
+
+typecheck:
+    uv run mypy src/
+
+check: lint typecheck test

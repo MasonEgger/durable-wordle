@@ -1,6 +1,13 @@
 # AI Files
 commit-msg.md
 
+# Playwright MCP artifacts
+.playwright-mcp/
+debug-*.png
+
+# Temporal dev server state
+temporal.db
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

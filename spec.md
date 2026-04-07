@@ -1,298 +1,157 @@
-# Demo Wordle - Technical Specification
+# Durable Wordle - Technical Specification
 
 ## Project Overview
 
-Demo Wordle is a lightweight Wordle clone designed for live interactive presentations and workshops teaching Temporal workflow concepts. Attendees experience a familiar game (Wordle) while the presenter demonstrates parent-child workflows, Updates, Queries, and Activities in a running system. The entire application is intentionally minimal — no database, no AI, no user accounts — so that every line of code either plays the game or demonstrates a Temporal pattern.
+Durable Wordle is a Wordle clone that teaches Temporal's core concepts in a 20-30 minute conference talk. The key insight: instead of storing game state in a database, each game session *is* a Temporal workflow. Close your browser, come back — the game is still there. That's durable execution.
 
-This is a teaching tool, not a production app. It prioritizes clarity and "aha moments" over completeness.
+## What This Teaches
+
+| What the user does | Temporal concept |
+|---|---|
+| Visits the page, starts a game | `start_workflow` |
+| Submits a guess | Update (request/response with durable state) |
+| Word is checked against dictionary | Activity (side effect: file I/O) |
+| Closes tab, reopens, game is still there | Durability — the whole point |
+| Wins or uses all 6 guesses | Workflow completion |
+
+That's it. Five concepts. No parent-child workflows, no entity workflows, no signals, no schedules.
 
 ## Technology Stack
 
 - **Backend**: Temporal Python SDK, FastAPI
-- **Frontend**: Single-page HTMX + Tailwind CSS, embedded JavaScript for animations
-- **Word Source**: Hardcoded word list (no external API or AI dependency)
-- **Package Management**: uv
-- **Development**: Temporal CLI dev server (`temporal server start-dev`)
+- **Frontend**: HTMX, Tailwind CSS
+- **Deployment**: Docker Compose with Temporal dev server
+- **Package management**: uv
 
-## Architecture Overview
+## Architecture
 
-### Workflow Architecture
+### One Workflow Per Game Session
 
-1. **Daily Game Workflow (Parent)**: Picks a word, spawns child workflows for each player, tracks basic stats
-2. **User Session Workflow (Child)**: Handles one player's game via Updates and Queries
+Each browser session gets a cookie. Each cookie maps to one Temporal workflow. The workflow holds the game state (target word, guesses so far, win/loss status) and runs until the game ends.
 
-There is no database, no entity workflow, no scheduled triggers. The presenter starts the daily workflow manually (or via a simple script), which is actually better for demos — you control when things happen.
+```mermaid
+flowchart LR
+    Browser -->|HTTP| FastAPI -->|Update| UserSessionWorkflow
+    UserSessionWorkflow --> validate_guess["validate_guess (Activity)"]
+    UserSessionWorkflow --> calculate_feedback["calculate_feedback (pure fn)"]
+    UserSessionWorkflow --> completion["completes when won or out of guesses"]
+```
 
-### How a Game Plays Out
+### Workflow: UserSessionWorkflow
 
-1. Presenter starts a Daily Game Workflow (picks a word, begins accepting players)
-2. Audience member opens the web page, types their first guess
-3. FastAPI sends an Update to the parent workflow: "create a session for this player"
-4. Parent spawns a child workflow, returns the child workflow ID
-5. API stores child workflow ID in a cookie
-6. Each subsequent guess is an Update to the child workflow
-7. Child returns feedback (green/yellow/gray) via the Update response
-8. When the game ends (win or 6 guesses), child workflow completes and returns the result to the parent
-9. Parent aggregates stats (viewable via Query)
+- **Input**: Target word for the day, session ID
+- **State**: List of guesses, feedback for each, win/loss status
+- **Update handler** (`make_guess`): Validates the guess, calculates feedback (green/yellow/gray), updates state, returns result
+- **Query** (`get_game_state`): Returns current board state for page renders
+- **Completion**: Workflow returns final game result when game ends
 
-### Temporal Patterns Demonstrated
+### Activity: validate_guess
 
-| Pattern | Where | Why It Matters |
-|---------|-------|---------------|
-| Parent-child workflows | Daily spawns per-user sessions | Workflow composition and lifecycle |
-| Updates (request-response) | Guess submission + session creation | Synchronous interaction with workflows |
-| Queries (read-only) | Game state + daily statistics | Non-mutating state access |
-| Activities | Word selection, guess validation | Side effects isolated from workflow logic |
-| `wait_condition(all_handlers_finished)` | Parent shutdown | Graceful workflow completion |
-| `parent_close_policy=ABANDON` | Child workflows | Children survive parent completion |
-| Workflow return values | Child returns GameResult to parent | Data flow between workflows |
-
-## Detailed Requirements
+- Checks that the guess is in a bundled valid-words list (~2,000 common 5-letter words)
+- This is an Activity because it reads from an external word list (side effect), keeping the workflow deterministic
+- Pure format checks (length, alphabetic) happen in the workflow directly
 
 ### Word Selection
 
-**Activity: `pick_word`**
-- Selects a random word from a hardcoded list of common 5-letter English words
-- List lives in the activity module (~200-300 words is plenty)
-- Must be in an Activity (not inline in workflow) because `random` is non-deterministic
-- Word length is always 5 (not configurable — keeps things simple)
-- Returns the word as a lowercase string
+- A curated answer list (~300 words), one picked per day based on date
+- `random.seed(date)` + `random.choice` — deterministic per day, no external dependency
+- No AI generation, no external API calls — zero dependencies that can fail during a live demo
 
-### Guess Validation
+## Web Layer
 
-**Activity: `validate_guess`**
-- Checks that a guess is exactly 5 letters, alphabetic, and in the valid word list
-- The valid word list is larger than the answer list (standard Wordle pattern) — ~2000-3000 common words
-- Returns a boolean (valid/invalid) plus an error message if invalid
-- Word lists are module-level constants (no file I/O)
+### FastAPI Routes
 
-### Feedback Calculation
+- `GET /` — Render the game board. If a session cookie exists and a workflow is running, query its state. Otherwise show an empty board.
+- `POST /guess` — Submit a guess. If no workflow exists for this session, start one. Then send the guess as an Update. Return the updated board via HTMX partial.
+- `GET /health` — Simple health check for Docker.
 
-**Pure function: `calculate_feedback`**
-- Standard Wordle algorithm with GREEN-first processing:
-  1. First pass: mark exact position matches as GREEN, consume from letter pool
-  2. Second pass: check remaining pool for YELLOW, else GRAY
-- This is pure game logic, not an Activity — it runs inside the workflow
-- Returns ordered list of `(letter, color)` feedback per position
+### Session Management
 
-### Daily Game Workflow (Parent)
+- Cookie-based with `session_id` (UUID)
+- HttpOnly, secure defaults
+- Workflow ID derived from date + session ID (e.g., `wordle-2026-04-04-{session_id}`)
+- Returning users on the same day get their existing workflow
 
-**Workflow ID**: `demo-wordle-{date}` (e.g., `demo-wordle-2025-01-15`)
+### Frontend
 
-**Initialization**:
-- Execute `pick_word` Activity to select the day's word
-- Set `_initialized` flag for Update handler guard
-- Initialize empty stats (wins by guess count, losses, active sessions)
+- Standard Wordle game board layout
+- HTMX swaps for guess submissions (no full page reloads)
+- Tailwind CSS for styling
+- Minimal JavaScript — keyboard input handling only
+- Mobile-responsive
+- Shareable results (emoji grid) on completion
 
-**Update Handler: `create_session`**:
-- Input: none (just a request for a new session)
-- Spawns a `UserSessionWorkflow` as a child workflow
-- Child workflow ID: `demo-wordle-{date}-{uuid}`
-- `parent_close_policy=ABANDON` so children survive parent shutdown
-- Returns child workflow ID to caller
-- Tracks child workflow handle for result collection
-
-**Query Handler: `get_statistics`**:
-- Returns current day stats: total players, wins by guess count (1-6), losses, games in progress
-
-**Result Collection**:
-- As child workflows complete, parent collects `GameResult` return values
-- Updates running statistics in workflow state
-- Uses fire-and-forget async tasks to await child results
-
-**Shutdown**:
-- The workflow runs until explicitly told to end (via a signal or a simple boolean flag)
-- `await workflow.wait_condition(workflow.all_handlers_finished)` before completing
-- No automatic day boundary logic — presenter controls when the day ends
-- On shutdown, count any still-active children as abandoned
-
-### User Session Workflow (Child)
-
-**Initialization**:
-- Receives the target word as input from parent
-- Creates `GameState` with empty guess history
-- Sets `_initialized` flag
-
-**Update Handler: `submit_guess`**:
-- Guard: `await workflow.wait_condition(lambda: self._initialized)`
-- Input: the guessed word (string)
-- Executes `validate_guess` Activity
-- If invalid: returns error response (game state unchanged)
-- If valid: runs `calculate_feedback`, updates game state
-- If game over (correct guess or 6th guess): marks game complete
-- Returns: guess feedback + current game state + completion status
-
-**Query Handler: `get_game_state`**:
-- Returns current game state (all guesses with feedback, game status)
-- Used by frontend on page reload to restore UI
-
-**Completion**:
-- When game ends, workflow returns `GameResult` (win/loss, number of guesses)
-- This return value is collected by the parent workflow
-
-### Game State Model
+## Project Structure
 
 ```
-GameState:
-  target_word: str
-  guesses: list[GuessResult]
-  status: "playing" | "won" | "lost"
-  max_guesses: 6
-
-GuessResult:
-  word: str
-  feedback: list[LetterFeedback]
-
-LetterFeedback:
-  letter: str
-  status: "correct" | "present" | "absent"  # green, yellow, gray
-
-GameResult:
-  won: bool
-  num_guesses: int
-```
-
-### Web API (FastAPI)
-
-**Single router, minimal endpoints:**
-
-`POST /guess`
-- Body: `{"guess": "crane"}`
-- Cookie: `session_workflow_id` (may be absent)
-- If no cookie: send `create_session` Update to daily parent, get child ID, set cookie
-- Send `submit_guess` Update to child workflow
-- Return: HTMX partial (game board HTML fragment)
-
-`GET /`
-- Serves the single-page game UI
-- If cookie exists: Query child workflow for current game state, render board with existing guesses
-- If no cookie: render empty board
-
-`GET /stats`
-- Query daily parent workflow for statistics
-- Return: HTMX partial (stats display)
-- This is for the presenter to show on screen during the demo
-
-**Configuration**:
-- Daily workflow ID is set via environment variable or hardcoded default
-- Temporal server address: `localhost:7233` (dev server default)
-- No `.env` file needed — sensible defaults for everything
-
-### User Interface
-
-**Single HTML page with HTMX + Tailwind CSS + embedded JS:**
-
-**Layout**:
-- "Demo Wordle" title/branding
-- 6x5 game board grid (standard Wordle layout)
-- On-screen keyboard with color state tracking
-- Simple stats display (visible to presenter, maybe toggled)
-- Clean, minimal — looks like Wordle, not like a dev tool
-
-**HTMX Interactions**:
-- Guess submission: `hx-post="/guess"` on form submit
-- Server returns updated board HTML (partial swap)
-- Stats refresh: `hx-get="/stats"` with polling or manual trigger
-
-**Embedded JavaScript (minimal, for UX only)**:
-- Tile flip animation on guess feedback (CSS transitions + JS trigger)
-- Tile pop animation on letter entry
-- Shake animation on invalid guess
-- Keyboard letter entry and backspace handling
-- Color state tracking on virtual keyboard (green > yellow > gray priority)
-- Win/loss celebration or message display
-
-**Styling**:
-- Tailwind CSS via CDN (no build step)
-- Dark mode by default (matches classic Wordle aesthetic)
-- Responsive but optimized for desktop (presentation context)
-- Color scheme: standard Wordle green/yellow/gray (hardcoded, not configurable)
-
-**No JavaScript framework**. No build step. One HTML file with embedded `<script>` tags is ideal. HTMX handles server communication, JS handles animations and keyboard input.
-
-## Technical Implementation
-
-### Project Structure
-
-```
-demo-wordle/
-├── src/demo_wordle/
+durable-wordle/
+├── src/durable_wordle/
 │   ├── __init__.py
-│   ├── workflows.py        # DailyGameWorkflow + UserSessionWorkflow
-│   ├── activities.py       # pick_word, validate_guess
-│   ├── models.py           # GameState, GuessResult, LetterFeedback, GameResult
+│   ├── workflows.py        # UserSessionWorkflow
+│   ├── activities.py       # validate_guess
+│   ├── models.py           # GameState, GuessResult, LetterFeedback dataclasses
 │   ├── game_logic.py       # calculate_feedback (pure function)
+│   ├── word_lists.py       # Curated answer + valid guess word lists
+│   ├── config.py           # Settings with env vars and defaults
 │   ├── api.py              # FastAPI app, routes, template rendering
-│   ├── worker.py           # Temporal worker startup
-│   └── word_lists.py       # Hardcoded answer + valid guess word lists
+│   └── worker.py           # Temporal worker startup
 ├── templates/
 │   └── index.html          # Single-page HTMX/Tailwind UI
 ├── tests/
-│   ├── test_game_logic.py  # calculate_feedback tests
-│   ├── test_activities.py  # Activity tests with ActivityEnvironment
-│   └── test_workflows.py   # Workflow tests with WorkflowEnvironment
+├── docker-compose.yml
 ├── pyproject.toml
-├── justfile
 └── README.md
 ```
 
-### Development Workflow
+## Configuration
+
+- `DURABLE_WORDLE_TEMPORAL_HOST`: Temporal server address (default: `localhost:7233`)
+- `DURABLE_WORDLE_TEMPORAL_NAMESPACE`: Temporal namespace (default: `default`)
+- `DURABLE_WORDLE_TEMPORAL_TASK_QUEUE`: Task queue name (default: `wordle-tasks`)
+
+That's the full config. No API keys, no AI providers, no admin passwords.
+
+## Development & Deployment
+
+### Local Development
 
 ```bash
-# Setup
-just install              # uv sync
-temporal server start-dev # Start Temporal dev server (separate terminal)
-
-# Run
-just worker               # Start Temporal worker
-just api                  # Start FastAPI server
-just start-game           # Start a Daily Game Workflow (or script it)
-
-# Development
-just check                # format + lint + typecheck + test
-just test                 # pytest with coverage
+just worker    # Start the Temporal worker
+just server    # Start the FastAPI dev server
+just test      # Run tests
+just check     # Typecheck + lint + test
 ```
 
-### Testing Strategy
+### Docker Deployment
 
-**Game Logic** (pure unit tests):
-- `calculate_feedback` edge cases: duplicate letters, all green, all gray, mixed
-- No Temporal involvement
+```bash
+docker-compose up    # Starts Temporal dev server, worker, and web app
+```
 
-**Activities** (`ActivityEnvironment`):
-- `pick_word` returns a valid 5-letter word
-- `validate_guess` accepts valid words, rejects invalid ones
-- Mock `random.choice` if determinism needed in tests
+### Testing
 
-**Workflows** (`WorkflowEnvironment.start_local()`):
-- Mock all activities with `@activity.defn(name="original_name")` functions
-- Test parent creates child on `create_session` Update
-- Test child processes guesses and returns correct feedback
-- Test child completes and returns `GameResult`
-- Test parent aggregates statistics correctly
-- Test parent `get_statistics` Query returns expected data
-- Use `pydantic_data_converter` for Pydantic model serialization in tests
+- Workflow tests use `WorkflowEnvironment` from the Temporal SDK
+- Activity tests use `ActivityEnvironment`
+- API tests use FastAPI's test client
+- All tests run with `uv run pytest`
 
-### Presenter Workflow
+## Implementation Constraints
 
-During the demo/presentation:
-1. Start Temporal dev server and worker (pre-demo setup)
-2. Start FastAPI server
-3. Run `just start-game` to create the daily workflow
-4. Share the URL with the audience (or show on screen)
-5. Play a game live, showing the Temporal Web UI alongside
-6. Show workflow history, child workflows, Update/Query in the UI
-7. Query stats to show aggregation
-8. Optionally: kill the worker mid-game, restart it, show the game resumes (durability!)
+- **Single argument pattern**: Workflow and activity inputs are always a single dataclass
+- **Activity imports**: Use `workflow.unsafe.imports_passed_through()` in workflows
+- **Type-safe queries**: Use method references, not string names
+- **No `Any` types**: Strict type checking
 
-## Success Criteria
+## What's Intentionally Left Out
 
-- A player can open the page and play a complete game of Wordle
-- The game board animates tile flips and keyboard color updates
-- Game state survives page refresh (cookie + Query restores state)
-- Game state survives worker restart (durability demo)
-- Presenter can show Temporal Web UI with clear parent-child workflow hierarchy
-- Stats Query shows live game statistics
-- The entire codebase fits in a single presentation's worth of explanation (~500 lines of application code)
-- Zero external service dependencies (no database, no AI API, no cloud services)
-- Setup is: install deps, start temporal, start worker, start API, play
+These are great Temporal patterns but wrong for a 25-minute intro talk:
+
+- **Parent-child workflows** (daily game spawning sessions) — adds a layer of indirection that obscures the core "workflow = game" mental model
+- **Entity workflows** (statistics aggregation) — interesting pattern, but requires explaining Signals and long-running workflows before you can even get to the point
+- **Schedules** (auto-starting daily workflows) — operational concern, not educational
+- **Timezone overlap logic** — operationally correct, pedagogically confusing
+- **Admin interface** — doesn't teach Temporal
+- **AI word generation** — external dependency that can fail during a live demo
+- **User account workflows** — second entity workflow pattern, save for a workshop
+
+Any of these could be added as "next steps" in the talk's closing slide or a follow-up blog post.

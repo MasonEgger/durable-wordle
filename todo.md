@@ -1,72 +1,52 @@
-# Demo Wordle - Implementation Checklist
+# Durable Wordle — Todo Checklist
 
-## Step 1: Project Scaffolding
-- [x] 1.1 Create pyproject.toml with dependencies and tool config
-- [x] 1.2 Create directory structure with placeholder files
-- [x] 1.3 Create justfile with recipes
-- [x] 1.4 Create .gitignore
-- [x] 1.5 Run `uv sync` to install dependencies
-- [x] 1.6 Run `just check` to verify clean state
+## Step 1: Project Scaffolding & Configuration
+- [x] 1. Create pyproject.toml with dependencies and tooling config
+- [x] 2. Create justfile with dev recipes (worker, server, test, lint, format, typecheck, check)
+- [x] 3. Create package structure (src/durable_wordle/__init__.py, tests/__init__.py)
+- [x] 4. RED: Write configuration tests (tests/test_config.py)
+- [x] 5. GREEN: Create src/durable_wordle/config.py with Settings and env var loading
+- [x] 6. Run `uv sync` and `just check`
 
-## Step 2: Data Models
-- [ ] 2.1 RED: Write model tests in tests/test_models.py
-- [ ] 2.2 GREEN: Implement models in src/demo_wordle/models.py
-- [ ] 2.3 REFACTOR: Review model clarity
-- [ ] 2.4 Run `just check`
+## Step 2: Models & Game Logic
+- [x] 1. RED: Write model construction tests (tests/test_models.py)
+- [x] 2. GREEN: Create src/durable_wordle/models.py (LetterFeedback, GuessResult, GameState)
+- [x] 3. RED: Write calculate_feedback tests (tests/test_game_logic.py)
+- [x] 4. GREEN: Create src/durable_wordle/game_logic.py (calculate_feedback)
+- [x] 5. REFACTOR: Review calculate_feedback for clarity
+- [x] 6. Run `just check`
 
-## Step 3: Word Lists
-- [ ] 3.1 RED: Write word list tests in tests/test_word_lists.py
-- [ ] 3.2 GREEN: Populate word lists in src/demo_wordle/word_lists.py
-- [ ] 3.3 Run `just check`
+## Step 3: Word Lists & Validation Activity
+- [x] 1. RED: Write word list tests (tests/test_word_lists.py)
+- [x] 2. GREEN: Create src/durable_wordle/word_lists.py (ANSWER_LIST, VALID_GUESSES, get_daily_word, is_valid_guess)
+- [x] 3. RED: Write validate_guess activity tests (tests/test_activities.py)
+- [x] 4. GREEN: Create src/durable_wordle/activities.py (validate_guess activity)
+- [x] 5. REFACTOR: Ensure word lists use frozensets for O(1) lookup
+- [x] 6. Run `just check`
 
-## Step 4: Game Logic (calculate_feedback)
-- [ ] 4.1 RED: Write calculate_feedback tests in tests/test_game_logic.py
-- [ ] 4.2 GREEN: Implement calculate_feedback in src/demo_wordle/game_logic.py
-- [ ] 4.3 REFACTOR: Ensure two-pass algorithm clarity
-- [ ] 4.4 Run `just check`
+## Step 4: UserSessionWorkflow
+- [x] 1. RED: Write workflow tests (tests/test_workflows.py)
+- [x] 2. GREEN: Create src/durable_wordle/workflows.py (UserSessionWorkflow)
+- [x] 3. REFACTOR: Clean workflow logic
+- [x] 4. Run `just check`
 
-## Step 5: Activities (pick_word, validate_guess)
-- [ ] 5.1 RED: Write activity tests in tests/test_activities.py
-- [ ] 5.2 GREEN: Implement activities in src/demo_wordle/activities.py
-- [ ] 5.3 REFACTOR: Review error messages
-- [ ] 5.4 Run `just check`
+## Step 5: FastAPI API & Session Management
+- [x] 1. Create minimal templates/index.html placeholder
+- [x] 2. RED: Write API tests (tests/test_api.py, tests/conftest.py)
+- [x] 3. GREEN: Create src/durable_wordle/api.py (routes, session management, Temporal client)
+- [x] 4. REFACTOR: Extract Temporal client lifecycle
+- [x] 5. Run `just check`
 
-## Step 6: User Session Workflow (Child)
-- [ ] 6.1 RED: Write UserSessionWorkflow tests in tests/test_workflows.py
-- [ ] 6.2 GREEN: Implement UserSessionWorkflow in src/demo_wordle/workflows.py
-- [ ] 6.3 REFACTOR: Clean up update handler return shape
-- [ ] 6.4 Run `just check`
+## Step 6: Frontend Template (HTMX/Tailwind)
+- [x] 1. RED: Write template rendering tests (add to tests/test_api.py)
+- [x] 2. GREEN: Create full templates/index.html (HTMX/Tailwind game UI)
+- [x] 3. Add HTMX partial response support to api.py
+- [x] 4. REFACTOR: Clean up template, accessibility
+- [x] 5. Run `just check`
 
-## Step 7: Daily Game Workflow (Parent)
-- [ ] 7.1 RED: Write DailyGameWorkflow tests in tests/test_workflows.py
-- [ ] 7.2 GREEN: Implement DailyGameWorkflow in src/demo_wordle/workflows.py
-- [ ] 7.3 REFACTOR: Verify result collection logic
-- [ ] 7.4 Run `just check`
-
-## Step 8: Temporal Worker
-- [ ] 8.1 Create src/demo_wordle/worker.py
-- [ ] 8.2 Create src/demo_wordle/start_game.py
-- [ ] 8.3 Run `just check`
-
-## Step 9: FastAPI API
-- [ ] 9.1 RED: Write API tests in tests/test_api.py
-- [ ] 9.2 GREEN: Implement FastAPI app in src/demo_wordle/api.py
-- [ ] 9.3 REFACTOR: Error handling for workflow-not-found
-- [ ] 9.4 Run `just check`
-
-## Step 10: Frontend UI
-- [ ] 10.1 Create templates/index.html with Tailwind + HTMX
-- [ ] 10.2 Build game board (6x5 grid)
-- [ ] 10.3 Build on-screen keyboard
-- [ ] 10.4 Wire HTMX interactions
-- [ ] 10.5 Implement embedded JavaScript (keyboard, animations)
-- [ ] 10.6 Add CSS animations (flip, pop, shake)
-- [ ] 10.7 Manual full-stack verification
-- [ ] 10.8 Run `just check`
-
-## Step 11: Integration & Polish
-- [ ] 11.1 RED: Write integration edge-case tests
-- [ ] 11.2 GREEN: Fix edge cases
-- [ ] 11.3 Polish for presentation (Web UI, durability demo)
-- [ ] 11.4 Run `just check`
-- [ ] 11.5 Update README.md
+## Step 7: Worker & Docker Compose
+- [x] 1. Create src/durable_wordle/worker.py
+- [x] 2. Create Dockerfile
+- [x] 3. Create docker-compose.yml
+- [ ] 4. Test locally with docker-compose up
+- [x] 5. Run `just check` final verification
