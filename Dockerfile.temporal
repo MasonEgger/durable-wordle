@@ -1,0 +1,8 @@
+# ABOUTME: Custom Temporal server image that ensures /data is writable.
+# The base image runs as uid 1000 (temporal), but volume mounts default to root.
+
+FROM temporalio/temporal:latest
+
+USER root
+RUN mkdir -p /data && chown temporal:temporal /data
+USER temporal

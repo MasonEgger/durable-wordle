@@ -9,6 +9,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src/ src/
 COPY templates/ templates/
+COPY static/ static/
 RUN uv sync --frozen --no-dev
 
 EXPOSE 8000

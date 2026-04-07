@@ -1,12 +1,14 @@
 services:
   temporal:
-    image: temporalio/temporal:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.temporal
     command: server start-dev --ip 0.0.0.0 --db-filename /data/temporal.db
     ports:
       - "7233:7233"
       - "8233:8233"
     volumes:
-      - ./temporal.db:/data/temporal.db
+      - temporal-data:/data
     restart: unless-stopped
 
   worker:
@@ -27,3 +29,6 @@ services:
       - worker
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
+
+volumes:
+  temporal-data:
