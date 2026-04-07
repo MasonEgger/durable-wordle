@@ -1,11 +1,12 @@
 # ABOUTME: Shared pytest fixtures for Temporal test environments used
 # across workflow and API tests.
+import uuid
 from collections.abc import AsyncGenerator, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from temporalio.testing import WorkflowEnvironment
+from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 
 from durable_wordle.word_lists import is_valid_guess
 
@@ -34,3 +35,15 @@ def mock_dictionary_api() -> Generator[MagicMock, None, None]:
 
         mock_get.side_effect = fake_get
         yield mock_get
+
+
+@pytest.fixture()
+def task_queue() -> str:
+    """Generate a unique task queue name per test."""
+    return str(uuid.uuid4())
+
+
+@pytest.fixture()
+def activity_environment() -> ActivityEnvironment:
+    """Create a Temporal ActivityEnvironment for isolated activity testing."""
+    return ActivityEnvironment()

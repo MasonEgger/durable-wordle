@@ -1,6 +1,5 @@
 # ABOUTME: Tests for the calculate_feedback activity that determines green,
 # yellow, and gray feedback for each letter in a Wordle guess.
-import pytest
 from temporalio.testing import ActivityEnvironment
 
 from durable_wordle.activities import calculate_feedback
@@ -9,12 +8,6 @@ from durable_wordle.models import CalculateFeedbackInput, LetterFeedback
 CORRECT = LetterFeedback.CORRECT
 PRESENT = LetterFeedback.PRESENT
 ABSENT = LetterFeedback.ABSENT
-
-
-@pytest.fixture()
-def activity_environment() -> ActivityEnvironment:
-    """Create a Temporal ActivityEnvironment for isolated activity testing."""
-    return ActivityEnvironment()
 
 
 def test_all_correct_letters(activity_environment: ActivityEnvironment) -> None:

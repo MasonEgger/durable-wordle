@@ -4,45 +4,15 @@ A Wordle clone where each game session is a [Temporal](https://temporal.io) work
 
 Close the browser, reopen it, and your game is still there. That's durable execution.
 
-## What This Teaches
+## Temporal Concepts Demonstrated
 
-Durable Wordle demonstrates five Temporal concepts using a single, easy-to-follow codebase:
-
-### 1. Starting a Workflow (`start_workflow`)
-
-Each browser session starts a new Temporal workflow. The workflow ID is deterministic — `wordle-{date}-{session_id}` — so returning to the page reconnects you to the same game.
-
-**Where to look:** `api.py` → `_get_or_start_workflow()`
-
-### 2. Updates (`execute_update`)
-
-Guesses are submitted via Temporal's Update primitive — a request/response interaction that durably mutates workflow state and returns a result. The Update handler validates the guess, runs activities for word validation and feedback calculation, and updates the game board. An Update validator rejects invalid input (wrong length, non-alphabetic, game already over) before anything is written to history.
-
-**Where to look:** `workflow.py` → `UserSessionWorkflow.make_guess()`
-
-### 3. Queries (`query`)
-
-The game board is rendered by querying the workflow for its current state. Queries are read-only — they can't change workflow state, which makes them safe to call at any time.
-
-**Where to look:** `workflow.py` → `UserSessionWorkflow.get_game_state()`
-
-### 4. Activities (`execute_activity`)
-
-Three activities demonstrate different use cases:
-
-- **`validate_guess`** — checks the guess against a bundled word list (file I/O side effect)
-- **`calculate_feedback`** — computes green/yellow/gray feedback per letter (recorded in event history for observability)
-- **`select_daily_word`** — picks the daily word from a date seed (non-deterministic randomness)
-
-Each activity appears as a distinct event in the workflow history, making every step of every guess inspectable in the Temporal UI.
-
-**Where to look:** `activities.py`
-
-### 5. Durable Execution and Workflow Completion
-
-The workflow holds game state in memory and waits (`workflow.wait_condition`) until the game ends. If the worker restarts, Temporal replays the workflow's event history to rebuild the exact same state — no data loss, no recovery code. When the player wins or loses, the workflow completes and returns the final game state.
-
-**Where to look:** `workflow.py` → `UserSessionWorkflow.run()`
+| Concept | What It Does Here | Where to Look |
+|---|---|---|
+| **Start Workflow** | Each session starts a workflow; deterministic ID reconnects returning players | `api.py` → `_get_or_start_workflow()` |
+| **Updates** | Guesses mutate workflow state and return feedback; a validator rejects bad input before history is written | `workflow.py` → `make_guess()` |
+| **Queries** | Read-only game board retrieval, safe to call any time | `workflow.py` → `get_game_state()` |
+| **Activities** | Word selection, guess validation (dictionary API), and feedback calculation — each visible in event history | `activities.py` |
+| **Durable Execution** | Workflow holds state in memory; worker restarts replay history to rebuild state with zero data loss | `workflow.py` → `run()` |
 
 ## Architecture
 

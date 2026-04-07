@@ -85,7 +85,7 @@ def calculate_feedback(
     normalized_target = activity_input.target.upper()
     word_length = len(normalized_guess)
 
-    feedback: list[LetterFeedback | None] = [None] * word_length
+    feedback: list[LetterFeedback] = [LetterFeedback.ABSENT] * word_length
     remaining_counts: Counter[str] = Counter(normalized_target)
 
     # First pass: mark exact matches (CORRECT) and decrement their counts
@@ -96,20 +96,16 @@ def calculate_feedback(
             feedback[position] = LetterFeedback.CORRECT
             remaining_counts[guess_letter] -= 1
 
-    # Second pass: mark PRESENT or ABSENT for non-exact positions
+    # Second pass: mark PRESENT for non-exact positions with remaining letters
     for position in range(word_length):
-        if feedback[position] is not None:
+        if feedback[position] is LetterFeedback.CORRECT:
             continue
         guess_letter = normalized_guess[position]
         if remaining_counts[guess_letter] > 0:
             feedback[position] = LetterFeedback.PRESENT
             remaining_counts[guess_letter] -= 1
-        else:
-            feedback[position] = LetterFeedback.ABSENT
 
-    result = [
-        letter_feedback for letter_feedback in feedback if letter_feedback is not None
-    ]
+    result = feedback
     feedback_summary = "".join(fb.value[0].upper() for fb in result)
     activity.logger.info(
         "calculate_feedback: %s vs %s → %s",

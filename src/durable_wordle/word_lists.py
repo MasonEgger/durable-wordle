@@ -1546,8 +1546,8 @@ def get_daily_word(date: datetime.date) -> str:
     :param date: The calendar date to pick a word for.
     :returns: An uppercase 5-letter word from the answer list.
     """
-    random.seed(date.toordinal())
-    return random.choice(ANSWER_LIST)
+    rng = random.Random(date.toordinal())
+    return rng.choice(ANSWER_LIST)
 
 
 def is_valid_guess(word: str) -> bool:

@@ -22,12 +22,6 @@ from durable_wordle.workflow import UserSessionWorkflow
 WRONG_GUESSES = ["ABOVE", "ABUSE", "ACTOR", "ADMIT", "ADOPT", "ADULT"]
 
 
-@pytest.fixture()
-def task_queue() -> str:
-    """Generate a unique task queue name per test."""
-    return str(uuid.uuid4())
-
-
 class TestUserSessionWorkflow:
     """Tests for the UserSessionWorkflow game lifecycle."""
 

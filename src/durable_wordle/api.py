@@ -55,8 +55,7 @@ def _build_keyboard_state(
         LetterFeedback.ABSENT: "bg-gray-900",
     }
     for guess in guesses:
-        for letter_index, letter_feedback in enumerate(guess.feedback):
-            letter = guess.word[letter_index]
+        for letter, letter_feedback in zip(guess.word, guess.feedback):
             css_class = feedback_to_css[letter_feedback]
             current = letter_states.get(letter, "")
             if priority.get(css_class, 0) > priority.get(current, 0):
@@ -374,8 +373,8 @@ def create_app(
                 error_response.set_cookie(key="game_id", value=game_id, httponly=True)
             return error_response
 
-        # Query current state for rendering
-        game_state = await _query_existing_game(client, workflow_id)
+        # Query current state for rendering — handle is already known valid
+        game_state = await handle.query(UserSessionWorkflow.get_game_state)
 
         response = _render_board(
             templates,

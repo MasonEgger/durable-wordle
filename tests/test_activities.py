@@ -2,18 +2,11 @@
 # and select_word for deterministic daily word selection.
 import datetime
 
-import pytest
 from temporalio.testing import ActivityEnvironment
 
 from durable_wordle.activities import select_word, validate_guess
 from durable_wordle.models import SelectWordInput, ValidateGuessInput
 from durable_wordle.word_lists import get_daily_word
-
-
-@pytest.fixture()
-def activity_environment() -> ActivityEnvironment:
-    """Create a Temporal ActivityEnvironment for isolated activity testing."""
-    return ActivityEnvironment()
 
 
 class TestValidateGuess:

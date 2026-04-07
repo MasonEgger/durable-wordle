@@ -4,7 +4,6 @@ import concurrent.futures
 import datetime
 import uuid
 
-import pytest
 from httpx import ASGITransport, AsyncClient
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -17,12 +16,6 @@ from durable_wordle.activities import (
 from durable_wordle.api import create_app
 from durable_wordle.word_lists import get_daily_word
 from durable_wordle.workflow import UserSessionWorkflow
-
-
-@pytest.fixture()
-def task_queue() -> str:
-    """Generate a unique task queue name per test."""
-    return f"test-api-{uuid.uuid4()}"
 
 
 def _make_client(
