@@ -1,0 +1,68 @@
+<div id="leaderboard-screen"
+     class="flex flex-col items-center w-full max-w-lg px-4 gap-4 py-4 screen-enter"
+     data-madlibs="{{ madlibs_json }}">
+
+    <img src="/static/mascot.svg" alt="Temporal mascot" class="w-28 h-28 object-contain" draggable="false">
+
+    {% if entries and entries | selectattr("madlib_noun") | list %}
+    <div id="madlib-area" class="flex items-center flex-wrap gap-1.5 font-mono text-sm justify-center" style="transition: opacity 0.3s ease;">
+        <span class="text-slate-300">What if your</span>
+        <span id="madlib-noun-chip"
+              class="px-2 py-0.5 border border-temporal-grellow text-temporal-grellow font-bold rounded tracking-widest">
+            {{ entries[0].madlib_noun }}
+        </span>
+        <span class="text-slate-300">never</span>
+        <span id="madlib-verb-chip"
+              class="px-2 py-0.5 border border-temporal-grellow text-temporal-grellow font-bold rounded tracking-widest">
+            {{ entries[0].madlib_verb }}
+        </span>
+        <span class="text-slate-300">?</span>
+    </div>
+    {% else %}
+    <p class="font-mono text-xs text-slate-500 text-center">
+        What if your
+        <span class="px-1.5 py-0.5 border border-slate-700 text-slate-500 font-bold rounded">CODE</span>
+        never
+        <span class="px-1.5 py-0.5 border border-slate-700 text-slate-500 font-bold rounded">FAILED</span>
+        ?
+    </p>
+    {% endif %}
+
+    {% if entries %}
+    <div class="w-full flex flex-col border-t border-[#3a3a3c] mt-1">
+        {% for entry in entries %}
+        <div class="flex items-center gap-4 py-3 border-b border-[#3a3a3c] {% if loop.index <= 3 %}py-3.5{% endif %}">
+            {# Rank #}
+            <span class="w-10 shrink-0 text-center font-mono font-bold leading-none {% if loop.index <= 3 %}text-xl{% else %}text-sm text-slate-500{% endif %}">
+                {%- if loop.index == 1 %}🥇
+                {%- elif loop.index == 2 %}🥈
+                {%- elif loop.index == 3 %}🥉
+                {%- else %}{{ loop.index }}.{% endif -%}
+            </span>
+            {# Name #}
+            <span class="flex-1 font-mono {% if loop.index <= 3 %}text-base font-bold text-white{% else %}text-sm text-slate-300{% endif %} truncate">
+                {{ entry.player_name }}
+            </span>
+            {# Guess count #}
+            <span class="font-mono text-xs text-slate-500 shrink-0 w-16 text-right">
+                {{ entry.guesses }}&nbsp;word{{ "s" if entry.guesses != 1 }}
+            </span>
+            {# Time #}
+            <span class="font-mono text-sm font-bold shrink-0 w-16 text-right {% if loop.index <= 3 %}text-temporal-grellow{% else %}text-white{% endif %}">
+                {{ entry.elapsed_formatted }}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="font-mono text-slate-400 text-sm text-center py-6">
+        No scores yet. Win a game to post your time!
+    </p>
+    {% endif %}
+
+    <a href="/new-game"
+       class="mt-1 px-8 py-3 border border-[#3a3a3c] hover:border-slate-400 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase flex items-center gap-2">
+        START OVER <span aria-hidden="true">&#8635;</span>
+    </a>
+
+</div>

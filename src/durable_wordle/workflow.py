@@ -65,7 +65,7 @@ class UserSessionWorkflow:
             SelectWordInput(game_date=game_date),
             start_to_close_timeout=timedelta(seconds=10),
         )
-        self._game_state = GameState(target_word=target_word)
+        self._game_state = GameState(target_word=target_word, started_at=workflow.now())
         workflow.logger.info(
             "Game initialized (session=%s, mode=%s)",
             workflow_input.session_id,

@@ -2,6 +2,7 @@
 # guess results, and game state used by workflows and API layers.
 import enum
 from dataclasses import dataclass, field
+from datetime import datetime
 
 
 class LetterFeedback(enum.StrEnum):
@@ -43,6 +44,7 @@ class GameState:
     guesses: list[GuessResult] = field(default_factory=list)
     max_guesses: int = 6
     status: str = "playing"
+    started_at: datetime | None = None
 
     @property
     def is_game_over(self) -> bool:

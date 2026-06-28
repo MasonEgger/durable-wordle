@@ -151,27 +151,51 @@ class TestGuessEndpoint:
 class TestTemplateRendering:
     """Tests for the full HTMX/Tailwind game UI template."""
 
-    async def test_page_contains_six_row_game_grid(
+    async def test_index_shows_start_screen_when_no_game(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
-        """The rendered page should contain a 6-row game grid."""
+        """GET / with no active game should show the start screen."""
         async with _make_client(workflow_environment, task_queue) as client:
             response = await client.get("/")
             body = response.text
-            # Count actual row divs with the class, not JS references
-            assert body.count('class="guess-row') == 6
+            assert "start-screen" in body
+            assert "PLAY" in body
 
-    async def test_page_contains_keyboard_section(
+    async def test_play_returns_game_grid(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
-        """The rendered page should contain an on-screen keyboard."""
-        async with _make_client(workflow_environment, task_queue) as client:
-            response = await client.get("/")
-            body = response.text
-            assert "keyboard" in body.lower()
-            # Keyboard should contain letter keys
-            assert ">Q<" in body
-            assert ">Z<" in body
+        """POST /play should return the game screen with a 6-row board."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    response = await client.post("/play")
+                    body = response.text
+                    assert body.count('class="guess-row') == 6
+
+    async def test_play_returns_keyboard_section(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """POST /play should return the game screen containing an on-screen keyboard."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    response = await client.post("/play")
+                    body = response.text
+                    assert "keyboard" in body.lower()
+                    assert ">Q<" in body
+                    assert ">Z<" in body
 
     async def test_correct_feedback_renders_green(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
@@ -186,7 +210,9 @@ class TestTemplateRendering:
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
-                    response = await client.post("/guess", data={"guess": "ABOUT"})
+                    today = datetime.date.today()
+                    daily_word = get_daily_word(today)
+                    response = await client.post("/guess", data={"guess": daily_word})
                     body = response.text
                     # Correct word — all tiles should be green
                     assert "bg-green-500" in body
@@ -207,18 +233,18 @@ class TestTemplateRendering:
                     # ABOVE against daily word — some letters may be present
                     response = await client.post("/guess", data={"guess": "ABOVE"})
                     body = response.text
-                    # At minimum we should see green or yellow or gray tiles
+                    # At minimum we should see green, amber, or slate tiles
                     has_feedback = (
                         "bg-green-500" in body
-                        or "bg-yellow-500" in body
-                        or "bg-gray-500" in body
+                        or "bg-amber-500" in body
+                        or "bg-slate-600" in body
                     )
                     assert has_feedback
 
-    async def test_absent_feedback_renders_gray(
+    async def test_absent_feedback_renders_wordle_absent(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
-        """A guess with ABSENT feedback should render with gray styling."""
+        """A guess with ABSENT feedback renders with the wordle-absent tile color."""
         with concurrent.futures.ThreadPoolExecutor() as executor:
             async with Worker(
                 workflow_environment.client,
@@ -230,13 +256,13 @@ class TestTemplateRendering:
                 async with _make_client(workflow_environment, task_queue) as client:
                     response = await client.post("/guess", data={"guess": "QUICK"})
                     body = response.text
-                    # QUICK has letters unlikely to all match — expect gray tiles
-                    assert "bg-gray-500" in body
+                    # Absent tiles use the dark-navy wordle-absent color from the design
+                    assert "bg-wordle-absent" in body
 
-    async def test_won_game_shows_success_and_share(
+    async def test_won_game_shows_success_and_actions(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
-        """A won game should show a success message and share button."""
+        """A won game should show a success message and endgame action buttons."""
         with concurrent.futures.ThreadPoolExecutor() as executor:
             async with Worker(
                 workflow_environment.client,
@@ -246,19 +272,17 @@ class TestTemplateRendering:
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
-                    # The daily word is deterministic — guess it directly
-                    # We need to know the daily word for today
                     today = datetime.date.today()
                     daily_word = get_daily_word(today)
                     response = await client.post("/guess", data={"guess": daily_word})
                     body = response.text
-                    assert "Congratulations" in body or "won" in body.lower()
-                    assert "share" in body.lower()
+                    assert "splendid" in body.lower() or "won" in body.lower()
+                    assert "start over" in body.lower()
 
-    async def test_lost_game_shows_word_and_share(
+    async def test_lost_game_shows_word_and_actions(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
-        """A lost game should show the target word and a share button."""
+        """A lost game should show the target word and endgame action buttons."""
         with concurrent.futures.ThreadPoolExecutor() as executor:
             async with Worker(
                 workflow_environment.client,
@@ -292,4 +316,56 @@ class TestTemplateRendering:
                         )
                     body = response.text
                     assert daily_word in body
-                    assert "share" in body.lower()
+                    assert "start over" in body.lower()
+
+
+class TestDesignSystemCompliance:
+    """Verify design tokens from the Figma file are reflected in rendered HTML.
+
+    Each test maps to a specific Figma node and design property:
+    - Title (4128:756): Space Mono Bold, color #cfff0d (temporal-grellow)
+    - Subtitle (4128:758): Space Mono Regular, color #cacbf9 (temporal-indigo)
+    - Absent tiles: dark navy #2d3458 (wordle-absent)
+    """
+
+    async def test_title_uses_space_mono_bold(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Title must use Space Mono Bold per Figma node 4128:756."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/")
+            body = response.text
+            assert "font-mono" in body
+            assert "font-bold" in body
+
+    async def test_title_uses_temporal_grellow(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Title color must be temporal-grellow (#cfff0d) per Figma node 4128:756."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/")
+            assert "text-temporal-grellow" in response.text
+
+    async def test_powered_by_uses_temporal_indigo(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """POWERED BY text color must be temporal-indigo (#cacbf9) per Figma node."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/")
+            assert "text-temporal-indigo" in response.text
+
+    async def test_absent_tiles_use_wordle_absent_color(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Absent letter tiles must use wordle-absent (#2d3458) per Figma design."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    response = await client.post("/guess", data={"guess": "QUICK"})
+                    assert "bg-wordle-absent" in response.text

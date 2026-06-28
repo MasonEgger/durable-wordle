@@ -1,12 +1,19 @@
+{# Base classes shared by every tile — defined once, used inline below. #}
+{% set TILE_BASE = "w-16 h-16 flex items-center justify-center text-2xl font-bold rounded-lg border-2" %}
+
 {% if error_message %}
-<div id="error-message" class="bg-gray-800/80 backdrop-blur text-temporal-white px-4 py-2 rounded-lg text-sm w-full text-center border border-gray-700/50" role="alert">
+<div id="error-message"
+     class="bg-slate-800/80 backdrop-blur text-white px-4 py-2 rounded-lg text-sm w-full text-center border border-slate-700/50"
+     role="alert">
     {{ error_message }}
 </div>
 {% endif %}
 
 <div id="status-area" class="h-10 flex items-center justify-center w-full">
     {% if status_message %}
-    <div id="status-message" class="text-temporal-white px-4 py-2 rounded-lg text-sm text-center font-semibold {% if animate %}hidden{% endif %}" role="status">
+    <div id="status-message"
+         class="text-white px-4 py-2 rounded-lg text-sm text-center font-semibold {% if animate %}hidden{% endif %}"
+         role="status">
         {{ status_message }}
     </div>
     {% endif %}
@@ -17,51 +24,43 @@
     {% set is_latest = loop.last %}
     <div class="guess-row flex gap-1.5 justify-center" role="row">
         {% for letter_index in range(guess.feedback | length) %}
-        {% set feedback_class = {
-            "correct": "bg-green-500 border-green-500",
-            "present": "bg-yellow-500 border-yellow-500",
-            "absent": "bg-gray-600 border-gray-600"
-        }[guess.feedback[letter_index].value] %}
+        {% set letter = guess.word[letter_index] %}
+        {% set fv = guess.feedback[letter_index].value %}
+        {% set color_cls = tile_feedback_css[fv] %}
+        {% set aria = letter ~ ", " ~ fv %}
         {% if is_latest and animate %}
-        <div class="tile-reveal w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-2xl font-bold rounded-md border-2 border-gray-600/50 bg-gray-800/60"
-             data-color="{{ feedback_class }}"
+        <div class="tile-reveal {{ TILE_BASE }} border-wordle-tile-empty bg-transparent"
+             data-color="{{ color_cls }}"
              style="animation-delay: {{ letter_index * 300 }}ms"
              role="gridcell"
-             aria-label="{{ guess.word[letter_index] }}, {{ guess.feedback[letter_index].value }}">
-            {{ guess.word[letter_index] }}
-        </div>
+             aria-label="{{ aria }}">{{ letter }}</div>
         {% else %}
-        <div class="w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-2xl font-bold rounded-md {{ feedback_class }} border-2"
+        <div class="{{ TILE_BASE }} {{ color_cls }}"
              role="gridcell"
-             aria-label="{{ guess.word[letter_index] }}, {{ guess.feedback[letter_index].value }}">
-            {{ guess.word[letter_index] }}
-        </div>
+             aria-label="{{ aria }}">{{ letter }}</div>
         {% endif %}
         {% endfor %}
     </div>
     {% endfor %}
 
-    {% set current_row = guesses | length %}
     {% if status == "playing" %}
     <div id="current-row" class="guess-row flex gap-1.5 justify-center" role="row">
         {% for tile_index in range(5) %}
-        <div class="current-tile w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-2xl font-bold rounded-md border-2 {% if animate and has_started %}border-gray-700/30 bg-gray-800/20{% else %}border-gray-600/50 bg-gray-800/40{% endif %}"
+        <div class="current-tile {{ TILE_BASE }} border-wordle-tile-active bg-[rgba(55,71,97,0.3)]"
              data-index="{{ tile_index }}"
-             role="gridcell" aria-label="Empty">
-        </div>
+             role="gridcell" aria-label="Empty"></div>
         {% endfor %}
     </div>
-    {% set remaining_empty = max_guesses - current_row - 1 %}
+    {% set remaining_empty = max_guesses - (guesses | length) - 1 %}
     {% else %}
-    {% set remaining_empty = max_guesses - current_row %}
+    {% set remaining_empty = max_guesses - (guesses | length) %}
     {% endif %}
 
-    {% for empty_row_index in range(remaining_empty) %}
+    {% for _ in range(remaining_empty) %}
     <div class="guess-row flex gap-1.5 justify-center" role="row">
-        {% for empty_col_index in range(5) %}
-        <div class="w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-2xl font-bold rounded-md border-2 border-gray-700/30 bg-gray-800/20"
-             role="gridcell" aria-label="Empty">
-        </div>
+        {% for _ in range(5) %}
+        <div class="{{ TILE_BASE }} border-wordle-tile-empty bg-transparent"
+             role="gridcell" aria-label="Empty"></div>
         {% endfor %}
     </div>
     {% endfor %}
@@ -74,26 +73,28 @@
 </form>
 {% endif %}
 
-
-<div id="endgame-area" class="h-12 flex items-center justify-center w-full">
+<div id="action-area" class="flex items-center gap-3 justify-center mt-1">
     {% if status in ["won", "lost"] %}
     <div id="endgame-actions" class="{% if animate %}hidden{% endif %} flex items-center gap-3">
+        {% if status == "won" %}
         <button
-            id="share-button"
-            onclick="shareResults()"
-            class="glow-uv px-5 py-2 bg-temporal-uv hover:brightness-125 text-white font-bold rounded-lg transition-all text-sm"
-            aria-label="Share your results"
-        >
-            Share Results
+            hx-post="/leaderboard"
+            hx-target="#screen"
+            hx-swap="innerHTML"
+            class="px-5 py-2.5 bg-temporal-uv hover:brightness-125 text-white font-bold rounded-full transition-all text-xs tracking-widest">
+            POST TO LEADERBOARD
         </button>
-        <a
-            href="/new-game"
-            class="w-10 h-10 flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-600/50 rounded-full transition-all text-lg"
-            aria-label="Play again"
-            title="Play again"
-        >&#8635;</a>
-        <span id="share-confirmation" class="text-sm text-gray-400 hidden">Copied!</span>
+        {% endif %}
+        <a href="/new-game"
+           class="px-5 py-2.5 border border-[#3a3a3c] hover:border-slate-400 text-white font-bold rounded-full transition-all text-xs tracking-widest flex items-center gap-2">
+            START OVER <span aria-hidden="true">&#8635;</span>
+        </a>
     </div>
+    {% else %}
+    <a href="/new-game"
+       class="px-5 py-2.5 border border-[#3a3a3c] hover:border-slate-400 text-white font-bold rounded-full transition-all text-xs tracking-widest flex items-center gap-2 opacity-50">
+        START OVER <span aria-hidden="true">&#8635;</span>
+    </a>
     {% endif %}
 </div>
 
@@ -101,45 +102,39 @@
     {% for row in keyboard_rows %}
     <div class="flex gap-1">
         {% if loop.index == 3 %}
-        <button
-            class="keyboard-key keyboard-enter h-12 px-3 flex items-center justify-center text-xs font-bold rounded-lg bg-gray-800/80 border border-gray-600/50 hover:bg-gray-700 hover:border-gray-500 transition-all"
-            data-action="enter"
-            aria-label="Enter"
-        >ENTER</button>
+        <button class="keyboard-key h-14 px-4 flex items-center justify-center text-xs font-bold rounded-lg bg-wordle-key border border-white/10 hover:brightness-125 transition-all"
+                data-action="enter"
+                aria-label="Enter">ENTER</button>
         {% endif %}
         {% for key in row %}
-        {% set key_class = keyboard_state.get(key, "bg-gray-600") %}
-        <button
-            class="keyboard-key w-8 h-12 sm:w-10 sm:h-12 flex items-center justify-center text-sm font-bold rounded-lg {{ key_class }} border border-gray-600/50 hover:brightness-125 transition-all"
-            data-key="{{ key }}"
-            aria-label="{{ key }}"
-        >{{ key }}</button>
+        {% set key_bg = keyboard_state.get(key, "bg-wordle-key") %}
+        <button class="keyboard-key w-11 h-14 flex items-center justify-center text-sm font-bold rounded-lg {{ key_bg }} border border-white/10 hover:brightness-125 transition-all"
+                data-key="{{ key }}"
+                aria-label="{{ key }}">{{ key }}</button>
         {% endfor %}
         {% if loop.index == 3 %}
-        <button
-            class="keyboard-key keyboard-backspace h-12 px-3 flex items-center justify-center text-xs font-bold rounded-lg bg-gray-800/80 border border-gray-600/50 hover:bg-gray-700 hover:border-gray-500 transition-all"
-            data-action="backspace"
-            aria-label="Backspace"
-        >&#9003;</button>
+        <button class="keyboard-key h-14 px-4 flex items-center justify-center text-xs font-bold rounded-lg bg-wordle-key border border-white/10 hover:brightness-125 transition-all"
+                data-action="backspace"
+                aria-label="Backspace">&#9003;</button>
         {% endif %}
     </div>
     {% endfor %}
 </div>
 
 {% if status == "playing" and not has_started %}
-<div id="mode-selector" class="w-full bg-gray-800/60 backdrop-blur border border-gray-700/40 rounded-lg px-4 py-3 mt-3">
+<div id="mode-selector" class="w-full bg-slate-800/60 backdrop-blur border border-slate-700/40 rounded-lg px-4 py-3 mt-3">
     <div class="flex items-center justify-between">
-        <span class="text-sm font-bold text-gray-300">Word Selection</span>
+        <span class="text-sm font-bold text-slate-300">Word Selection</span>
         <label class="flex items-center gap-2 cursor-pointer">
-            <span class="text-xs text-gray-500">Daily</span>
+            <span class="text-xs text-slate-500">Daily</span>
             <div class="relative">
                 <input type="checkbox" id="random-toggle" class="sr-only peer"
                     {% if random_mode %}checked{% endif %}
                     onchange="document.getElementById('random-mode-input').value = this.checked ? 'true' : ''">
-                <div class="w-9 h-5 bg-gray-600 rounded-full peer peer-checked:bg-temporal-uv transition-colors"></div>
+                <div class="w-9 h-5 bg-slate-600 rounded-full peer peer-checked:bg-temporal-uv transition-colors"></div>
                 <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
             </div>
-            <span class="text-xs text-gray-500">Random</span>
+            <span class="text-xs text-slate-500">Random</span>
         </label>
     </div>
 </div>

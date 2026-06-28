@@ -1,0 +1,54 @@
+<div id="start-screen" class="flex flex-col items-center w-full max-w-lg px-4 gap-5 py-4 screen-enter">
+
+    <img src="/static/mascot.svg" alt="Temporal mascot" class="w-36 h-36 object-contain" draggable="false">
+
+    <p class="font-mono text-white text-center text-lg leading-relaxed max-w-sm">
+        Get 6 chances to guess a 5-letter word
+    </p>
+
+    <div class="w-full border-t border-[#3a3a3c]"></div>
+
+    <form class="w-full flex flex-col gap-4"
+          hx-post="/play"
+          hx-target="#screen"
+          hx-swap="innerHTML">
+
+        <div class="grid grid-cols-2 gap-3">
+            <div class="flex flex-col gap-1.5">
+                <label class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">First Name</label>
+                <input type="text" name="first_name" placeholder="MIN 3 CHARS" minlength="3"
+                       class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
+            </div>
+            <div class="flex flex-col gap-1.5">
+                <label class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">Last Name</label>
+                <input type="text" name="last_name" placeholder="MIN 3 CHARS" minlength="3"
+                       class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
+            </div>
+        </div>
+
+        <p class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">
+            A Quick Mad Libs Before You Start...
+        </p>
+
+        <div class="grid grid-cols-2 gap-3">
+            <input type="text" name="madlib_noun" placeholder="NOUN"
+                   class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
+            <input type="text" name="madlib_verb" placeholder="PAST TENSE VERB"
+                   class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
+        </div>
+
+        <button type="submit"
+                class="w-full py-3 bg-temporal-uv hover:brightness-125 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase mt-1">
+            PLAY
+        </button>
+    </form>
+
+    <button
+        class="w-full py-3 border border-[#3a3a3c] hover:border-slate-400 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase opacity-70"
+        hx-get="/leaderboard-screen"
+        hx-target="#screen"
+        hx-swap="innerHTML">
+        LEADERBOARD
+    </button>
+
+</div>

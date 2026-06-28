@@ -1,5 +1,6 @@
 # ABOUTME: FastAPI web layer connecting browsers to Temporal workflows.
 # Handles session cookies, game board rendering, and Temporal client lifecycle.
+import asyncio
 import datetime
 import json
 import os
@@ -13,9 +14,16 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
+from temporalio.client import (
+    Client,
+    WorkflowExecutionStatus,
+    WorkflowHandle,
+    WorkflowQueryFailedError,
+)
 from temporalio.service import RPCError
 
+from durable_wordle.leaderboard import add_entry as lb_add_entry
+from durable_wordle.leaderboard import get_madlib_pairs, get_top_entries
 from durable_wordle.models import (
     GameState,
     GuessResult,
@@ -35,30 +43,46 @@ KEYBOARD_ROWS: list[list[str]] = [
     ["Z", "X", "C", "V", "B", "N", "M"],
 ]
 
+# CSS classes for board tiles keyed by LetterFeedback.value — single source of truth
+# for both the template (tile rendering) and keyboard state builder.
+TILE_FEEDBACK_CSS: dict[str, str] = {
+    LetterFeedback.CORRECT.value: "bg-green-500 border-green-500",
+    LetterFeedback.PRESENT.value: "bg-amber-500 border-amber-500",
+    LetterFeedback.ABSENT.value: "bg-wordle-absent border-wordle-absent",
+}
+
+# Background CSS for keyboard keys, ordered highest→lowest priority.
+_KEY_FEEDBACK_CSS: dict[LetterFeedback, str] = {
+    LetterFeedback.CORRECT: "bg-green-500",
+    LetterFeedback.PRESENT: "bg-amber-500",
+    LetterFeedback.ABSENT: "bg-wordle-absent",
+}
+# Priority derived from insertion order so the dict above is the only thing to edit.
+_KEY_FEEDBACK_PRIORITY: dict[str, int] = {
+    css: len(_KEY_FEEDBACK_CSS) - idx
+    for idx, css in enumerate(_KEY_FEEDBACK_CSS.values())
+}
+
 
 def _build_keyboard_state(
     guesses: list[GuessResult],
 ) -> dict[str, str]:
-    """Build a mapping of each letter to its best-known feedback state.
+    """Build a mapping of each letter to its best-known feedback CSS class.
 
     Priority: CORRECT > PRESENT > ABSENT. A letter that was CORRECT in any
-    guess stays green even if it was ABSENT in another.
+    guess stays green even if it appeared as ABSENT in another.
 
     :param guesses: The list of guess results so far.
-    :returns: A dict mapping uppercase letters to CSS class names.
+    :returns: A dict mapping uppercase letters to keyboard-key CSS class names.
     """
     letter_states: dict[str, str] = {}
-    priority = {"bg-green-500": 3, "bg-yellow-500": 2, "bg-gray-900": 1}
-    feedback_to_css = {
-        LetterFeedback.CORRECT: "bg-green-500",
-        LetterFeedback.PRESENT: "bg-yellow-500",
-        LetterFeedback.ABSENT: "bg-gray-900",
-    }
     for guess in guesses:
         for letter, letter_feedback in zip(guess.word, guess.feedback):
-            css_class = feedback_to_css[letter_feedback]
+            css_class = _KEY_FEEDBACK_CSS[letter_feedback]
             current = letter_states.get(letter, "")
-            if priority.get(css_class, 0) > priority.get(current, 0):
+            if _KEY_FEEDBACK_PRIORITY.get(css_class, 0) > _KEY_FEEDBACK_PRIORITY.get(
+                current, 0
+            ):
                 letter_states[letter] = css_class
     return letter_states
 
@@ -122,6 +146,33 @@ async def _query_existing_game(client: Client, workflow_id: str) -> GameState | 
     return None
 
 
+async def _wait_for_game_state(
+    handle: WorkflowHandle[UserSessionWorkflow, GameState],
+    retries: int = 20,
+    delay: float = 0.1,
+) -> GameState:
+    """Query the workflow for game state, retrying until the word is selected.
+
+    The workflow runs a ``select_word`` activity before entering its main loop.
+    Queries issued before that activity completes will fail with
+    ``WorkflowQueryFailedError``. This helper retries with a short sleep.
+
+    :param handle: The workflow handle to query.
+    :param retries: Maximum number of attempts.
+    :param delay: Seconds to wait between retries.
+    :returns: The game state once the workflow has initialized.
+    :raises WorkflowQueryFailedError: If the workflow never initializes.
+    """
+    for attempt in range(retries):
+        try:
+            return await handle.query(UserSessionWorkflow.get_game_state)
+        except WorkflowQueryFailedError:
+            if attempt == retries - 1:
+                raise
+            await asyncio.sleep(delay)
+    raise WorkflowQueryFailedError("Workflow did not initialize in time")
+
+
 async def _get_or_start_workflow(
     client: Client,
     workflow_id: str,
@@ -157,63 +208,167 @@ async def _get_or_start_workflow(
     )
 
 
-def _render_board(
-    templates: Jinja2Templates,
+def _game_context(
     request: Request,
-    session_id: str,
-    is_new_session: bool,
-    game_state: GameState | None = None,
+    game_state: GameState | None,
     error_message: str = "",
     status_message: str = "",
-    partial: bool = False,
     random_mode: bool = False,
-) -> HTMLResponse:
-    """Render the game board template with current state.
+    animate: bool = False,
+) -> dict[str, Any]:
+    """Build the Jinja2 context dict for game-screen and board-partial templates.
 
-    Sets the session_id cookie on the response if this is a new session.
-    When ``partial`` is True, renders only the board partial for HTMX swaps.
-
-    :param templates: Jinja2 template engine.
     :param request: The incoming HTTP request.
-    :param session_id: The player's session ID.
-    :param is_new_session: Whether to set the session cookie on the response.
     :param game_state: Current game state, or None for an empty board.
     :param error_message: Optional error message to display.
     :param status_message: Optional status message to display.
-    :param partial: If True, render only the board partial template.
-    :returns: Rendered HTML response.
+    :param random_mode: Whether this is a random-word game.
+    :param animate: If True, apply tile-flip animation to the latest guess row.
+    :returns: Template context dict.
     """
     guesses = game_state.guesses if game_state else []
     status = game_state.status if game_state else "playing"
 
     if game_state and game_state.status == "won":
-        status_message = status_message or "Congratulations! You won!"
+        status_message = status_message or "🎉 SPLENDID! You won! 🎉"
     elif game_state and game_state.status == "lost":
         target = game_state.target_word
-        status_message = status_message or f"Game over! The word was {target}."
+        status_message = status_message or f"✗ OUT OF MOVES! The word was {target} ✗"
 
-    keyboard_state = _build_keyboard_state(guesses)
-    max_guesses = game_state.max_guesses if game_state else 6
-    target_word = game_state.target_word if game_state else ""
+    started_at_ts = (
+        int(game_state.started_at.timestamp())
+        if game_state and game_state.started_at
+        else 0
+    )
 
-    template_name = "_board_partial.html" if partial else "index.html"
-    has_started = len(guesses) > 0
-    context: dict[str, Any] = {
+    return {
         "request": request,
         "guesses": guesses,
         "status": status,
-        "max_guesses": max_guesses,
-        "target_word": target_word,
+        "max_guesses": game_state.max_guesses if game_state else 6,
+        "target_word": game_state.target_word if game_state else "",
         "error_message": error_message,
         "status_message": status_message,
         "keyboard_rows": KEYBOARD_ROWS,
-        "keyboard_state": keyboard_state,
+        "keyboard_state": _build_keyboard_state(guesses),
+        "tile_feedback_css": TILE_FEEDBACK_CSS,
         "random_mode": random_mode,
-        "has_started": has_started,
-        "animate": partial,
+        "has_started": len(guesses) > 0,
+        "animate": animate,
+        "started_at_ts": started_at_ts,
     }
+
+
+def _render_full_page(
+    templates: Jinja2Templates,
+    request: Request,
+    session_id: str,
+    is_new_session: bool,
+    game_state: GameState | None = None,
+    random_mode: bool = False,
+) -> HTMLResponse:
+    """Render the full index.html page with the appropriate screen.
+
+    Shows the start screen when there is no active game, otherwise shows
+    the game screen. Sets the session cookie if this is a new session.
+
+    :param templates: Jinja2 template engine.
+    :param request: The incoming HTTP request.
+    :param session_id: The player's session ID.
+    :param is_new_session: Whether to set the session cookie on the response.
+    :param game_state: Current game state, or None to show the start screen.
+    :param random_mode: Whether this is a random-word game.
+    :returns: Rendered HTML response.
+    """
+    if game_state is None:
+        context: dict[str, Any] = {
+            "request": request,
+            "screen_state": "start",
+            "current_screen_template": "_start_screen.html",
+        }
+    else:
+        context = {
+            **_game_context(request, game_state, random_mode=random_mode),
+            "screen_state": "game",
+            "current_screen_template": "_game_screen.html",
+        }
+
     response = templates.TemplateResponse(
-        request=request, name=template_name, context=context
+        request=request, name="index.html", context=context
+    )
+    if is_new_session:
+        response.set_cookie(key="session_id", value=session_id, httponly=True)
+    return response
+
+
+def _render_game_screen(
+    templates: Jinja2Templates,
+    request: Request,
+    session_id: str,
+    is_new_session: bool,
+    game_state: GameState,
+    error_message: str = "",
+    random_mode: bool = False,
+    animate: bool = False,
+) -> HTMLResponse:
+    """Render just the game-screen fragment for HTMX swaps into #screen.
+
+    :param templates: Jinja2 template engine.
+    :param request: The incoming HTTP request.
+    :param session_id: The player's session ID.
+    :param is_new_session: Whether to set the session cookie on the response.
+    :param game_state: Current game state.
+    :param error_message: Optional error message to display.
+    :param random_mode: Whether this is a random-word game.
+    :param animate: If True, apply tile-flip animation to the latest guess row.
+    :returns: Rendered HTML fragment response.
+    """
+    context = _game_context(
+        request,
+        game_state,
+        error_message=error_message,
+        random_mode=random_mode,
+        animate=animate,
+    )
+    response = templates.TemplateResponse(
+        request=request, name="_game_screen.html", context=context
+    )
+    if is_new_session:
+        response.set_cookie(key="session_id", value=session_id, httponly=True)
+    return response
+
+
+def _render_board_partial(
+    templates: Jinja2Templates,
+    request: Request,
+    session_id: str,
+    is_new_session: bool,
+    game_state: GameState,
+    error_message: str = "",
+    random_mode: bool = False,
+    animate: bool = False,
+) -> HTMLResponse:
+    """Render just the board partial for HTMX swaps into #game-content.
+
+    :param templates: Jinja2 template engine.
+    :param request: The incoming HTTP request.
+    :param session_id: The player's session ID.
+    :param is_new_session: Whether to set the session cookie on the response.
+    :param game_state: Current game state.
+    :param error_message: Optional error message to display.
+    :param random_mode: Whether this is a random-word game.
+    :param animate: If True, apply tile-flip animation to the latest guess row.
+    :returns: Rendered HTML fragment response.
+    """
+    context = _game_context(
+        request,
+        game_state,
+        error_message=error_message,
+        random_mode=random_mode,
+        animate=animate,
+    )
+    response = templates.TemplateResponse(
+        request=request, name="_board_partial.html", context=context
     )
     if is_new_session:
         response.set_cookie(key="session_id", value=session_id, httponly=True)
@@ -276,13 +431,13 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
-        """Render the game board page.
+        """Render the full page.
 
-        Reads the session cookie and queries an existing workflow for state.
-        If no workflow exists, renders an empty board.
+        Shows the start screen when no game is active, otherwise shows the
+        game screen with the current board state.
 
         :param request: The incoming HTTP request.
-        :returns: Rendered HTML game board.
+        :returns: Rendered HTML page.
         """
         existing_session = request.cookies.get("session_id")
         session_id = existing_session or str(uuid.uuid4())
@@ -295,7 +450,7 @@ def create_app(
 
         game_state = await _query_existing_game(client, workflow_id)
 
-        return _render_board(
+        return _render_full_page(
             templates,
             request,
             session_id,
@@ -304,21 +459,28 @@ def create_app(
             random_mode=game_id is not None,
         )
 
-    @app.post("/guess", response_class=HTMLResponse)
-    async def submit_guess(
+    @app.post("/play", response_class=HTMLResponse)
+    async def play(
         request: Request,
-        guess: str = Form(...),
         random_mode: bool = Form(default=False),
+        first_name: str | None = Form(default=None),
+        last_name: str | None = Form(default=None),
+        madlib_noun: str | None = Form(default=None),
+        madlib_verb: str | None = Form(default=None),
     ) -> HTMLResponse:
-        """Process a guess submission.
+        """Start a new game and return the game screen fragment.
 
-        Starts a new workflow if needed, sends the guess as an Update,
-        and returns the updated game board.
+        Creates or resumes a workflow for the current session and returns
+        the game screen HTML fragment for HTMX to swap into #screen.
+        Stores player name and madlib values in cookies for leaderboard use.
 
         :param request: The incoming HTTP request.
-        :param guess: The guessed word from the form.
         :param random_mode: Whether to use random word selection.
-        :returns: Rendered HTML game board with updated state.
+        :param first_name: Player's first name for the leaderboard.
+        :param last_name: Player's last name for the leaderboard.
+        :param madlib_noun: The noun for the madlib phrase.
+        :param madlib_verb: The past-tense verb for the madlib phrase.
+        :returns: Rendered game screen HTML fragment.
         """
         existing_session = request.cookies.get("session_id")
         session_id = existing_session or str(uuid.uuid4())
@@ -328,7 +490,76 @@ def create_app(
         queue: str = app.state.task_queue
         today = datetime.date.today()
 
-        # For random mode, use game_id cookie; for daily, use date
+        game_id = request.cookies.get("game_id")
+        if random_mode and not game_id:
+            game_id = str(uuid.uuid4())
+
+        workflow_id = get_workflow_id(
+            session_id,
+            game_date=None if random_mode else today,
+            game_id=game_id if random_mode else None,
+        )
+        handle = await _get_or_start_workflow(
+            client, workflow_id, session_id, queue, random_mode=random_mode
+        )
+        game_state = await _wait_for_game_state(handle)
+
+        response = _render_game_screen(
+            templates,
+            request,
+            session_id,
+            is_new_session,
+            game_state=game_state,
+            random_mode=random_mode,
+        )
+        if random_mode and game_id:
+            response.set_cookie(key="game_id", value=game_id, httponly=True)
+        elif not random_mode:
+            # Clear any stale game_id from a previous random/new-game session so
+            # the leaderboard route can find the correct daily workflow.
+            response.delete_cookie(key="game_id")
+
+        player_name = " ".join(
+            part
+            for part in [(first_name or "").strip(), (last_name or "").strip()]
+            if part
+        )
+        if player_name:
+            response.set_cookie(key="player_name", value=player_name, httponly=True)
+        if madlib_noun and madlib_noun.strip():
+            response.set_cookie(
+                key="madlib_noun", value=madlib_noun.strip().upper(), httponly=True
+            )
+        if madlib_verb and madlib_verb.strip():
+            response.set_cookie(
+                key="madlib_verb", value=madlib_verb.strip().upper(), httponly=True
+            )
+        return response
+
+    @app.post("/guess", response_class=HTMLResponse)
+    async def submit_guess(
+        request: Request,
+        guess: str = Form(...),
+        random_mode: bool = Form(default=False),
+    ) -> HTMLResponse:
+        """Process a guess submission.
+
+        Sends the guess as a workflow Update and returns the updated board
+        partial for HTMX to swap into #game-content.
+
+        :param request: The incoming HTTP request.
+        :param guess: The guessed word from the form.
+        :param random_mode: Whether to use random word selection.
+        :returns: Rendered board partial HTML fragment.
+        """
+        existing_session = request.cookies.get("session_id")
+        session_id = existing_session or str(uuid.uuid4())
+        is_new_session = existing_session is None
+
+        client: Client = app.state.temporal_client
+        queue: str = app.state.task_queue
+        today = datetime.date.today()
+
         game_id = request.cookies.get("game_id")
         if random_mode and not game_id:
             game_id = str(uuid.uuid4())
@@ -352,14 +583,12 @@ def create_app(
         except RPCError as rpc_err:
             error_message = _friendly_error(str(rpc_err))
         except Exception as update_err:
-            # WorkflowUpdateFailedError wraps the cause — dig it out
             cause = update_err.__cause__ or update_err
             error_message = _friendly_error(str(cause))
 
         is_htmx = request.headers.get("HX-Request") == "true"
 
         # On error for HTMX requests, return 422 with error trigger
-        # so the client can show a toast without replacing the board
         if error_message and is_htmx:
             error_response = HTMLResponse(content="", status_code=422)
             error_response.headers["HX-Trigger"] = json.dumps(
@@ -373,22 +602,87 @@ def create_app(
                 error_response.set_cookie(key="game_id", value=game_id, httponly=True)
             return error_response
 
-        # Query current state for rendering — handle is already known valid
         game_state = await handle.query(UserSessionWorkflow.get_game_state)
 
-        response = _render_board(
+        response = _render_board_partial(
             templates,
             request,
             session_id,
             is_new_session,
             game_state=game_state,
             error_message=error_message,
-            partial=is_htmx,
             random_mode=random_mode,
+            animate=is_htmx,
         )
         if random_mode and game_id:
             response.set_cookie(key="game_id", value=game_id, httponly=True)
         return response
+
+    def _leaderboard_context(request: Request) -> dict[str, Any]:
+        entries = get_top_entries()
+        madlibs = get_madlib_pairs(entries)
+        return {
+            "request": request,
+            "entries": entries,
+            "madlibs_json": json.dumps(madlibs),
+        }
+
+    @app.post("/leaderboard", response_class=HTMLResponse)
+    async def post_leaderboard(request: Request) -> HTMLResponse:
+        """Submit a leaderboard entry and return the leaderboard screen fragment.
+
+        Reads game state from the current workflow and player metadata from
+        cookies, then appends a new entry to the JSON leaderboard file.
+
+        :param request: The incoming HTTP request.
+        :returns: Rendered leaderboard screen HTML fragment.
+        """
+        session_id = request.cookies.get("session_id")
+        if session_id:
+            client: Client = app.state.temporal_client
+            game_id = request.cookies.get("game_id")
+            today = datetime.date.today()
+            workflow_id = get_workflow_id(session_id, game_date=today, game_id=game_id)
+            game_state = await _query_existing_game(client, workflow_id)
+
+            if game_state and game_state.status == "won":
+                lb_add_entry(
+                    player_name=request.cookies.get("player_name", "Anonymous"),
+                    guesses=len(game_state.guesses),
+                    started_at=game_state.started_at,
+                    madlib_noun=request.cookies.get("madlib_noun", ""),
+                    madlib_verb=request.cookies.get("madlib_verb", ""),
+                )
+
+        return templates.TemplateResponse(
+            request=request,
+            name="_leaderboard_screen.html",
+            context=_leaderboard_context(request),
+        )
+
+    @app.get("/leaderboard-screen", response_class=HTMLResponse)
+    async def leaderboard_screen(request: Request) -> HTMLResponse:
+        """Return the leaderboard screen fragment for HTMX swap into #screen.
+
+        :param request: The incoming HTTP request.
+        :returns: Rendered leaderboard screen HTML fragment.
+        """
+        return templates.TemplateResponse(
+            request=request,
+            name="_leaderboard_screen.html",
+            context=_leaderboard_context(request),
+        )
+
+    @app.get("/start-screen", response_class=HTMLResponse)
+    async def start_screen(request: Request) -> HTMLResponse:
+        """Return the start screen fragment for HTMX swap into #screen.
+
+        :param request: The incoming HTTP request.
+        :returns: Rendered start screen HTML fragment.
+        """
+        return templates.TemplateResponse(
+            request=request, name="_start_screen.html", context={}
+        )
 
     return app
 
