@@ -4,6 +4,8 @@ import enum
 from dataclasses import dataclass, field
 from datetime import datetime
 
+WORD_LENGTH: int = 5
+
 
 class LetterFeedback(enum.StrEnum):
     """Feedback for a single letter in a guess.
@@ -60,11 +62,9 @@ class WorkflowInput:
     """Input for starting a new Wordle game session workflow.
 
     :param session_id: Unique session identifier for this game.
-    :param random_mode: If True, pick a random word instead of the daily word.
     """
 
     session_id: str
-    random_mode: bool = False
 
 
 @dataclass

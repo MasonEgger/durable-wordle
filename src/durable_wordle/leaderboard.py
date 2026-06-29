@@ -1,13 +1,44 @@
-# ABOUTME: Leaderboard persistence backed by a local JSON file.
-# Entries survive restarts; sorted by fewest guesses then fastest time.
-import json
-from dataclasses import asdict, dataclass
+# ABOUTME: Leaderboard persistence backed by SQLite.
+# Entries are scoped by game_date for daily resets; all entries are retained for
+# prize outreach via get_entries_for_date with include_email=True.
+import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-LEADERBOARD_FILE = (
-    Path(__file__).resolve().parent.parent.parent / "data" / "leaderboard.json"
-)
+DB_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "leaderboard.db"
+TOP_N: int = 25
+
+_schema_ready = False
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _ensure_schema() -> None:
+    global _schema_ready
+    if _schema_ready:
+        return
+    DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with _connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS entries (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_name   TEXT    NOT NULL,
+                email         TEXT    NOT NULL DEFAULT '',
+                guesses       INTEGER NOT NULL,
+                elapsed_seconds INTEGER NOT NULL,
+                madlib_noun   TEXT    NOT NULL DEFAULT '',
+                madlib_verb   TEXT    NOT NULL DEFAULT '',
+                submitted_at  TEXT    NOT NULL,
+                game_date     TEXT    NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_game_date ON entries(game_date)")
+    _schema_ready = True
 
 
 @dataclass
@@ -15,19 +46,23 @@ class LeaderboardEntry:
     """A single leaderboard entry.
 
     :param player_name: Display name for the player.
+    :param email: Player email for prize outreach (not shown publicly).
     :param guesses: Number of guesses used.
     :param elapsed_seconds: Seconds from game start to win.
     :param madlib_noun: Noun from the player's madlib.
     :param madlib_verb: Past-tense verb from the player's madlib.
     :param submitted_at: ISO-format UTC timestamp of submission.
+    :param game_date: ISO date string (YYYY-MM-DD) of the game day.
     """
 
     player_name: str
+    email: str
     guesses: int
     elapsed_seconds: int
     madlib_noun: str
     madlib_verb: str
     submitted_at: str
+    game_date: str
 
     @property
     def elapsed_formatted(self) -> str:
@@ -35,51 +70,33 @@ class LeaderboardEntry:
 
         :returns: Human-readable elapsed time string.
         """
-        h = self.elapsed_seconds // 3600
-        m = (self.elapsed_seconds % 3600) // 60
-        s = self.elapsed_seconds % 60
-        return f"{h}:{m:02d}:{s:02d}"
-
-
-def _sort_key(entry: LeaderboardEntry) -> tuple[int, int]:
-    return (entry.guesses, entry.elapsed_seconds)
-
-
-def load_entries() -> list[LeaderboardEntry]:
-    """Load all leaderboard entries from disk.
-
-    :returns: List of entries, or empty list if file is missing/corrupt.
-    """
-    if not LEADERBOARD_FILE.exists():
-        return []
-    try:
-        data: list[dict[str, object]] = json.loads(LEADERBOARD_FILE.read_text())
-        return [LeaderboardEntry(**entry) for entry in data]  # type: ignore[arg-type]
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return []
-
-
-def _save_entries(entries: list[LeaderboardEntry]) -> None:
-    LEADERBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LEADERBOARD_FILE.write_text(json.dumps([asdict(e) for e in entries], indent=2))
+        hours = self.elapsed_seconds // 3600
+        minutes = (self.elapsed_seconds % 3600) // 60
+        seconds = self.elapsed_seconds % 60
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 
 def add_entry(
     player_name: str,
+    email: str,
     guesses: int,
     started_at: datetime | None,
     madlib_noun: str,
     madlib_verb: str,
+    game_date: str,
 ) -> list[LeaderboardEntry]:
-    """Append a new entry and persist the updated list.
+    """Insert a new entry and return the updated top entries for that day.
 
     :param player_name: Display name for the player.
+    :param email: Player email for prize outreach.
     :param guesses: Number of guesses used.
     :param started_at: When the game started (used to compute elapsed time).
     :param madlib_noun: Noun from the player's madlib.
     :param madlib_verb: Past-tense verb from the player's madlib.
-    :returns: Full sorted entry list after insertion.
+    :param game_date: ISO date string of the game day (YYYY-MM-DD).
+    :returns: Top entries for the day after insertion.
     """
+    _ensure_schema()
     now = datetime.now(UTC)
     if started_at is not None:
         if started_at.tzinfo is None:
@@ -88,37 +105,83 @@ def add_entry(
     else:
         elapsed = 0
 
-    entry = LeaderboardEntry(
-        player_name=player_name or "Anonymous",
-        guesses=guesses,
-        elapsed_seconds=elapsed,
-        madlib_noun=madlib_noun,
-        madlib_verb=madlib_verb,
-        submitted_at=now.isoformat(),
-    )
-    entries = load_entries()
-    entries.append(entry)
-    entries.sort(key=_sort_key)
-    _save_entries(entries)
-    return entries
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO entries
+                (player_name, email, guesses, elapsed_seconds,
+                 madlib_noun, madlib_verb, submitted_at, game_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                player_name or "Anonymous",
+                email or "",
+                guesses,
+                elapsed,
+                madlib_noun,
+                madlib_verb,
+                now.isoformat(),
+                game_date,
+            ),
+        )
+
+    return get_top_entries_for_date(game_date)
 
 
-def get_top_entries(n: int = 10) -> list[LeaderboardEntry]:
-    """Return the top N entries sorted by fewest guesses then fastest time.
+def get_top_entries_for_date(game_date: str, n: int = TOP_N) -> list[LeaderboardEntry]:
+    """Return the top N entries for a given game day.
 
+    Sorted by fewest guesses then fastest time.
+
+    :param game_date: ISO date string (YYYY-MM-DD).
     :param n: Maximum number of entries to return.
-    :returns: Top N leaderboard entries.
+    :returns: Top N leaderboard entries for the day.
     """
-    entries = load_entries()
-    entries.sort(key=_sort_key)
-    return entries[:n]
+    _ensure_schema()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT player_name, email, guesses, elapsed_seconds,
+                   madlib_noun, madlib_verb, submitted_at, game_date
+            FROM   entries
+            WHERE  game_date = ?
+            ORDER  BY guesses ASC, elapsed_seconds ASC
+            LIMIT  ?
+            """,
+            (game_date, n),
+        ).fetchall()
+    return [LeaderboardEntry(**dict(row)) for row in rows]
+
+
+def get_entries_for_date(game_date: str) -> list[LeaderboardEntry]:
+    """Return all entries for a given game day, including emails.
+
+    Use this for prize outreach — emails are not exposed to the public
+    leaderboard template.
+
+    :param game_date: ISO date string (YYYY-MM-DD).
+    :returns: All entries for the day, sorted by rank.
+    """
+    _ensure_schema()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT player_name, email, guesses, elapsed_seconds,
+                   madlib_noun, madlib_verb, submitted_at, game_date
+            FROM   entries
+            WHERE  game_date = ?
+            ORDER  BY guesses ASC, elapsed_seconds ASC
+            """,
+            (game_date,),
+        ).fetchall()
+    return [LeaderboardEntry(**dict(row)) for row in rows]
 
 
 def get_madlib_pairs(entries: list[LeaderboardEntry]) -> list[list[str]]:
     """Return unique [noun, verb] pairs from entries that have madlib data.
 
     :param entries: Leaderboard entries to scan.
-    :returns: Deduplicated list of [noun, verb] pairs, newest first.
+    :returns: Deduplicated list of [noun, verb] pairs.
     """
     seen: set[tuple[str, str]] = set()
     pairs: list[list[str]] = []

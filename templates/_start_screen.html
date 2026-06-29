@@ -1,13 +1,17 @@
-<div id="start-screen" class="flex flex-col items-center w-full max-w-lg px-4 gap-5 py-4 screen-enter">
+<div id="start-screen" class="flex-1 flex flex-col justify-between items-center w-full max-w-lg px-4 pt-4 pb-6 screen-enter">
 
-    <img src="/static/mascot.svg" alt="Temporal mascot" class="w-36 h-36 object-contain" draggable="false">
+    <!-- Top: mascot + tagline + divider -->
+    <div class="flex flex-col items-center gap-4 w-full">
+        <img src="/static/mascot.svg" alt="Temporal mascot" class="w-36 h-36 object-contain" draggable="false">
 
-    <p class="font-mono text-white text-center text-lg leading-relaxed max-w-sm">
-        Get 6 chances to guess a 5-letter word
-    </p>
+        <p class="font-mono text-white text-center text-lg leading-relaxed max-w-sm">
+            Get 6 chances to guess a 5-letter word
+        </p>
 
-    <div class="w-full border-t border-[#3a3a3c]"></div>
+        <div class="w-full border-t border-[#3a3a3c]"></div>
+    </div>
 
+    <!-- Bottom: form inputs + side-by-side PLAY / LEADERBOARD buttons -->
     <form class="w-full flex flex-col gap-4"
           hx-post="/play"
           hx-target="#screen"
@@ -26,6 +30,12 @@
             </div>
         </div>
 
+        <div class="flex flex-col gap-1.5">
+            <label class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">Email <span class="text-slate-500 normal-case tracking-normal">(for prize notification)</span></label>
+            <input type="email" name="email" placeholder="you@example.com"
+                   class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] focus:outline-none focus:border-temporal-indigo transition-colors">
+        </div>
+
         <p class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">
             A Quick Mad Libs Before You Start...
         </p>
@@ -37,18 +47,19 @@
                    class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
         </div>
 
-        <button type="submit"
-                class="w-full py-3 bg-temporal-uv hover:brightness-125 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase mt-1">
-            PLAY
-        </button>
+        <div class="flex gap-3 mt-1">
+            <button type="submit"
+                    class="flex-1 py-3 bg-temporal-uv hover:brightness-125 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase">
+                PLAY
+            </button>
+            <button type="button"
+                    class="flex-1 py-3 border border-[#3a3a3c] hover:border-slate-400 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase opacity-70"
+                    hx-get="/leaderboard-screen"
+                    hx-target="#screen"
+                    hx-swap="innerHTML">
+                LEADERBOARD
+            </button>
+        </div>
     </form>
-
-    <button
-        class="w-full py-3 border border-[#3a3a3c] hover:border-slate-400 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase opacity-70"
-        hx-get="/leaderboard-screen"
-        hx-target="#screen"
-        hx-swap="innerHTML">
-        LEADERBOARD
-    </button>
 
 </div>

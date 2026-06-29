@@ -69,7 +69,6 @@
 {% if status == "playing" %}
 <form id="guess-form" hx-post="/guess" hx-target="#game-content" hx-swap="innerHTML">
     <input type="hidden" id="guess-input" name="guess" value="">
-    <input type="hidden" id="random-mode-input" name="random_mode" value="{% if random_mode %}true{% endif %}">
 </form>
 {% endif %}
 
@@ -121,21 +120,3 @@
     {% endfor %}
 </div>
 
-{% if status == "playing" and not has_started %}
-<div id="mode-selector" class="w-full bg-slate-800/60 backdrop-blur border border-slate-700/40 rounded-lg px-4 py-3 mt-3">
-    <div class="flex items-center justify-between">
-        <span class="text-sm font-bold text-slate-300">Word Selection</span>
-        <label class="flex items-center gap-2 cursor-pointer">
-            <span class="text-xs text-slate-500">Daily</span>
-            <div class="relative">
-                <input type="checkbox" id="random-toggle" class="sr-only peer"
-                    {% if random_mode %}checked{% endif %}
-                    onchange="document.getElementById('random-mode-input').value = this.checked ? 'true' : ''">
-                <div class="w-9 h-5 bg-slate-600 rounded-full peer peer-checked:bg-temporal-uv transition-colors"></div>
-                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
-            </div>
-            <span class="text-xs text-slate-500">Random</span>
-        </label>
-    </div>
-</div>
-{% endif %}

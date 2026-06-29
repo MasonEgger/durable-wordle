@@ -1,7 +1,6 @@
 # ABOUTME: Tests for the FastAPI API layer covering session management,
 # game board rendering, health check, and Temporal workflow integration.
 import concurrent.futures
-import datetime
 import uuid
 
 from httpx import ASGITransport, AsyncClient
@@ -13,8 +12,7 @@ from durable_wordle.activities import (
     select_word,
     validate_guess,
 )
-from durable_wordle.api import create_app
-from durable_wordle.word_lists import get_daily_word
+from durable_wordle.api import create_app, get_workflow_id
 from durable_wordle.workflow import UserSessionWorkflow
 
 
@@ -130,10 +128,10 @@ class TestGuessEndpoint:
                     body = response.text
                     assert "error-message" in body or "not a valid word" in body.lower()
 
-    async def test_workflow_id_derived_from_date_and_session(
+    async def test_workflow_id_uses_game_id(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
-        """Workflow ID should follow the wordle-{date}-{session_id} pattern."""
+        """Workflow ID should follow the wordle-random-{game_id} pattern."""
         with concurrent.futures.ThreadPoolExecutor() as executor:
             async with Worker(
                 workflow_environment.client,
@@ -145,7 +143,9 @@ class TestGuessEndpoint:
                 async with _make_client(workflow_environment, task_queue) as client:
                     response = await client.post("/guess", data={"guess": "ABOVE"})
                     assert response.status_code == 200
-                    assert "session_id" in response.cookies
+                    assert "game_id" in response.cookies
+                    game_id = response.cookies["game_id"]
+                    assert get_workflow_id(game_id) == f"wordle-random-{game_id}"
 
 
 class TestTemplateRendering:
@@ -210,9 +210,15 @@ class TestTemplateRendering:
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
-                    today = datetime.date.today()
-                    daily_word = get_daily_word(today)
-                    response = await client.post("/guess", data={"guess": daily_word})
+                    play_response = await client.post("/play")
+                    game_id = play_response.cookies["game_id"]
+                    handle = workflow_environment.client.get_workflow_handle(
+                        get_workflow_id(game_id)
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+                    response = await client.post(
+                        "/guess", data={"guess": state.target_word}
+                    )
                     body = response.text
                     # Correct word — all tiles should be green
                     assert "bg-green-500" in body
@@ -272,9 +278,15 @@ class TestTemplateRendering:
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
-                    today = datetime.date.today()
-                    daily_word = get_daily_word(today)
-                    response = await client.post("/guess", data={"guess": daily_word})
+                    play_response = await client.post("/play")
+                    game_id = play_response.cookies["game_id"]
+                    handle = workflow_environment.client.get_workflow_handle(
+                        get_workflow_id(game_id)
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+                    response = await client.post(
+                        "/guess", data={"guess": state.target_word}
+                    )
                     body = response.text
                     assert "splendid" in body.lower() or "won" in body.lower()
                     assert "start over" in body.lower()
@@ -292,9 +304,14 @@ class TestTemplateRendering:
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
-                    today = datetime.date.today()
-                    daily_word = get_daily_word(today)
-                    # Pick 6 words that are NOT the daily word
+                    play_response = await client.post("/play")
+                    game_id = play_response.cookies["game_id"]
+                    handle = workflow_environment.client.get_workflow_handle(
+                        get_workflow_id(game_id)
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+                    target_word = state.target_word
+                    # Pick 6 words that are NOT the target word
                     wrong_words = [
                         word
                         for word in [
@@ -308,14 +325,14 @@ class TestTemplateRendering:
                             "AGAIN",
                             "AGENT",
                         ]
-                        if word != daily_word
+                        if word != target_word
                     ][:6]
                     for wrong_word in wrong_words:
                         response = await client.post(
                             "/guess", data={"guess": wrong_word}
                         )
                     body = response.text
-                    assert daily_word in body
+                    assert target_word in body
                     assert "start over" in body.lower()
 
 

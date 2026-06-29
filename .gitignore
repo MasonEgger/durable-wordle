@@ -8,6 +8,10 @@ debug-*.png
 # Temporal dev server state
 temporal.db
 
+# Leaderboard data (contains emails/PII)
+data/leaderboard.db
+data/leaderboard.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

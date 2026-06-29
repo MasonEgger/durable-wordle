@@ -12,6 +12,7 @@ with workflow.unsafe.imports_passed_through():
         validate_guess,
     )
     from durable_wordle.models import (
+        WORD_LENGTH,
         CalculateFeedbackInput,
         GameState,
         GuessResult,
@@ -55,21 +56,16 @@ class UserSessionWorkflow:
         :param workflow_input: Contains session ID and game mode.
         :returns: The final game state when the game is over.
         """
-        game_date = (
-            "" if workflow_input.random_mode else workflow.now().date().isoformat()
-        )
-        mode_label = "random" if workflow_input.random_mode else f"daily ({game_date})"
-        workflow.logger.info("Selecting word: %s", mode_label)
+        workflow.logger.info("Selecting word: random")
         target_word = await workflow.execute_activity(
             select_word,
-            SelectWordInput(game_date=game_date),
+            SelectWordInput(game_date=""),
             start_to_close_timeout=timedelta(seconds=10),
         )
         self._game_state = GameState(target_word=target_word, started_at=workflow.now())
         workflow.logger.info(
-            "Game initialized (session=%s, mode=%s)",
+            "Game initialized (session=%s, mode=random)",
             workflow_input.session_id,
-            "random" if workflow_input.random_mode else "daily",
         )
 
         await workflow.wait_condition(lambda: self._state.is_game_over)
@@ -166,7 +162,7 @@ class UserSessionWorkflow:
             )
 
         normalized_guess = guess_input.guess.strip().upper()
-        if len(normalized_guess) != 5:
+        if len(normalized_guess) != WORD_LENGTH:
             raise ApplicationError(
                 f"Guess must be exactly 5 letters, got {len(normalized_guess)}",
                 type="InvalidFormat",

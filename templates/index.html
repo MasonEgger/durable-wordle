@@ -128,8 +128,8 @@
                 nounEl.textContent = madlibs[idx][0];
                 verbEl.textContent = madlibs[idx][1];
                 areaEl.style.opacity = '1';
-            }, 300);
-        }, 3000);
+            }, MADLIB_FADE_MS);
+        }, MADLIB_CYCLE_MS);
     }
 
     // Init on full-page load if leaderboard is present
@@ -178,6 +178,14 @@
         initMadlibCycle();
     }
 
+    // ── Timing constants ───────────────────────────────────────────────────────
+    var TILE_FLIP_MS = 300;      // delay between consecutive tile flips
+    var TILE_COLOR_OFFSET = 250; // ms into a flip when the color swaps (mid-flip)
+    var SHAKE_DURATION_MS = 500; // shake animation duration
+    var ERROR_DISMISS_MS = 2000; // auto-dismiss for error overlays
+    var MADLIB_CYCLE_MS = 3000;  // interval between madlib phrase swaps
+    var MADLIB_FADE_MS = 300;    // fade-out duration before swapping text
+
     // ── Keyboard input ─────────────────────────────────────────────────────────
     var currentGuess = '';
     var MAX_LENGTH = 5;
@@ -207,7 +215,7 @@
         var tile = tiles[currentGuess.length - 1];
         if (tile) {
             tile.classList.add('tile-pop');
-            setTimeout(function() { tile.classList.remove('tile-pop'); }, 100);
+            setTimeout(function() { tile.classList.remove('tile-pop'); }, 100); // matches .tile-pop CSS
         }
     }
 
@@ -222,7 +230,7 @@
             var row = document.getElementById('current-row');
             if (row) {
                 row.classList.add('shake');
-                setTimeout(function() { row.classList.remove('shake'); }, 500);
+                setTimeout(function() { row.classList.remove('shake'); }, SHAKE_DURATION_MS);
             }
             return;
         }
@@ -240,7 +248,7 @@
 
     document.addEventListener('keydown', function(event) {
         if (event.target.tagName === 'TEXTAREA') return;
-        if (event.target.tagName === 'INPUT' && event.target.type === 'text') return;
+        if (event.target.tagName === 'INPUT') return;
         if (event.ctrlKey || event.metaKey || event.altKey) return;
         if (event.key === 'Enter') { event.preventDefault(); submitGuess(); }
         else if (event.key === 'Backspace') { event.preventDefault(); removeLetter(); }
@@ -276,13 +284,13 @@
                 setTimeout(function() {
                     tile.classList.remove('border-wordle-tile-empty', 'border-wordle-tile-active', 'bg-transparent', 'bg-[rgba(55,71,97,0.3)]');
                     colorClass.split(' ').forEach(function(cls) { tile.classList.add(cls); });
-                }, delayMs + 250);
+                }, delayMs + TILE_COLOR_OFFSET);
             });
 
             // Show status + endgame after last tile finishes
             var revealTiles = document.querySelectorAll('.tile-reveal');
             var revealDelay = revealTiles.length > 0
-                ? (revealTiles.length - 1) * 300 + 500
+                ? (revealTiles.length - 1) * TILE_FLIP_MS + TILE_FLIP_MS + 200
                 : 0;
 
             setTimeout(function() {
@@ -303,7 +311,7 @@
 
             // Auto-dismiss error overlay after 2 s
             var errorMsg = document.getElementById('error-message');
-            if (errorMsg) setTimeout(function() { errorMsg.remove(); }, 2000);
+            if (errorMsg) setTimeout(function() { errorMsg.remove(); }, ERROR_DISMISS_MS);
         }
     });
 
@@ -313,7 +321,7 @@
         var row = document.getElementById('current-row');
         if (row) {
             row.classList.add('shake');
-            setTimeout(function() { row.classList.remove('shake'); }, 500);
+            setTimeout(function() { row.classList.remove('shake'); }, SHAKE_DURATION_MS);
         }
 
         var existing = document.getElementById('error-toast');
@@ -324,7 +332,7 @@
         toast.className = 'fixed top-16 left-1/2 -translate-x-1/2 bg-white text-black px-4 py-2 rounded font-bold text-sm z-50';
         toast.textContent = message;
         document.body.appendChild(toast);
-        setTimeout(function() { toast.remove(); }, 2000);
+        setTimeout(function() { toast.remove(); }, ERROR_DISMISS_MS);
     });
     </script>
 </body>

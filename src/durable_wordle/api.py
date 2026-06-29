@@ -23,7 +23,7 @@ from temporalio.client import (
 from temporalio.service import RPCError
 
 from durable_wordle.leaderboard import add_entry as lb_add_entry
-from durable_wordle.leaderboard import get_madlib_pairs, get_top_entries
+from durable_wordle.leaderboard import get_madlib_pairs, get_top_entries_for_date
 from durable_wordle.models import (
     GameState,
     GuessResult,
@@ -105,25 +105,13 @@ def _friendly_error(raw_error: str) -> str:
     return "Something went wrong — try again"
 
 
-def get_workflow_id(
-    session_id: str,
-    game_date: datetime.date | None = None,
-    game_id: str | None = None,
-) -> str:
-    """Build a deterministic workflow ID from session and game context.
+def get_workflow_id(game_id: str) -> str:
+    """Build a workflow ID from a game identifier.
 
-    :param session_id: The player's session UUID.
-    :param game_date: The date of the game (daily mode).
-    :param game_id: Unique game identifier (random mode).
+    :param game_id: Unique game identifier (UUID).
     :returns: A workflow ID string.
     """
-    if game_id:
-        return f"wordle-random-{game_id}"
-    return (
-        f"wordle-{game_date.isoformat()}-{session_id}"
-        if game_date
-        else f"wordle-{session_id}"
-    )
+    return f"wordle-random-{game_id}"
 
 
 async def _query_existing_game(client: Client, workflow_id: str) -> GameState | None:
@@ -148,7 +136,7 @@ async def _query_existing_game(client: Client, workflow_id: str) -> GameState | 
 
 async def _wait_for_game_state(
     handle: WorkflowHandle[UserSessionWorkflow, GameState],
-    retries: int = 20,
+    retries: int = 100,
     delay: float = 0.1,
 ) -> GameState:
     """Query the workflow for game state, retrying until the word is selected.
@@ -178,7 +166,6 @@ async def _get_or_start_workflow(
     workflow_id: str,
     session_id: str,
     task_queue: str,
-    random_mode: bool = False,
 ) -> WorkflowHandle[UserSessionWorkflow, GameState]:
     """Get an existing workflow handle or start a new workflow.
 
@@ -186,7 +173,6 @@ async def _get_or_start_workflow(
     :param workflow_id: The workflow ID.
     :param session_id: The session ID.
     :param task_queue: The task queue for the worker.
-    :param random_mode: If True, pick a random word instead of daily.
     :returns: A workflow handle.
     """
     try:
@@ -202,7 +188,7 @@ async def _get_or_start_workflow(
 
     return await client.start_workflow(
         UserSessionWorkflow.run,
-        WorkflowInput(session_id=session_id, random_mode=random_mode),
+        WorkflowInput(session_id=session_id),
         id=workflow_id,
         task_queue=task_queue,
     )
@@ -213,7 +199,6 @@ def _game_context(
     game_state: GameState | None,
     error_message: str = "",
     status_message: str = "",
-    random_mode: bool = False,
     animate: bool = False,
 ) -> dict[str, Any]:
     """Build the Jinja2 context dict for game-screen and board-partial templates.
@@ -222,7 +207,6 @@ def _game_context(
     :param game_state: Current game state, or None for an empty board.
     :param error_message: Optional error message to display.
     :param status_message: Optional status message to display.
-    :param random_mode: Whether this is a random-word game.
     :param animate: If True, apply tile-flip animation to the latest guess row.
     :returns: Template context dict.
     """
@@ -252,7 +236,6 @@ def _game_context(
         "keyboard_rows": KEYBOARD_ROWS,
         "keyboard_state": _build_keyboard_state(guesses),
         "tile_feedback_css": TILE_FEEDBACK_CSS,
-        "random_mode": random_mode,
         "has_started": len(guesses) > 0,
         "animate": animate,
         "started_at_ts": started_at_ts,
@@ -265,7 +248,6 @@ def _render_full_page(
     session_id: str,
     is_new_session: bool,
     game_state: GameState | None = None,
-    random_mode: bool = False,
 ) -> HTMLResponse:
     """Render the full index.html page with the appropriate screen.
 
@@ -277,7 +259,6 @@ def _render_full_page(
     :param session_id: The player's session ID.
     :param is_new_session: Whether to set the session cookie on the response.
     :param game_state: Current game state, or None to show the start screen.
-    :param random_mode: Whether this is a random-word game.
     :returns: Rendered HTML response.
     """
     if game_state is None:
@@ -288,7 +269,7 @@ def _render_full_page(
         }
     else:
         context = {
-            **_game_context(request, game_state, random_mode=random_mode),
+            **_game_context(request, game_state),
             "screen_state": "game",
             "current_screen_template": "_game_screen.html",
         }
@@ -308,7 +289,6 @@ def _render_game_screen(
     is_new_session: bool,
     game_state: GameState,
     error_message: str = "",
-    random_mode: bool = False,
     animate: bool = False,
 ) -> HTMLResponse:
     """Render just the game-screen fragment for HTMX swaps into #screen.
@@ -319,7 +299,6 @@ def _render_game_screen(
     :param is_new_session: Whether to set the session cookie on the response.
     :param game_state: Current game state.
     :param error_message: Optional error message to display.
-    :param random_mode: Whether this is a random-word game.
     :param animate: If True, apply tile-flip animation to the latest guess row.
     :returns: Rendered HTML fragment response.
     """
@@ -327,7 +306,6 @@ def _render_game_screen(
         request,
         game_state,
         error_message=error_message,
-        random_mode=random_mode,
         animate=animate,
     )
     response = templates.TemplateResponse(
@@ -345,7 +323,6 @@ def _render_board_partial(
     is_new_session: bool,
     game_state: GameState,
     error_message: str = "",
-    random_mode: bool = False,
     animate: bool = False,
 ) -> HTMLResponse:
     """Render just the board partial for HTMX swaps into #game-content.
@@ -356,7 +333,6 @@ def _render_board_partial(
     :param is_new_session: Whether to set the session cookie on the response.
     :param game_state: Current game state.
     :param error_message: Optional error message to display.
-    :param random_mode: Whether this is a random-word game.
     :param animate: If True, apply tile-flip animation to the latest guess row.
     :returns: Rendered HTML fragment response.
     """
@@ -364,7 +340,6 @@ def _render_board_partial(
         request,
         game_state,
         error_message=error_message,
-        random_mode=random_mode,
         animate=animate,
     )
     response = templates.TemplateResponse(
@@ -373,6 +348,19 @@ def _render_board_partial(
     if is_new_session:
         response.set_cookie(key="session_id", value=session_id, httponly=True)
     return response
+
+
+def _session_from_request(request: Request) -> tuple[str, bool, str | None]:
+    """Extract or mint the session ID and game ID from cookies.
+
+    :param request: The incoming HTTP request.
+    :returns: ``(session_id, is_new_session, game_id)`` — ``is_new_session``
+        is ``True`` when no session cookie existed yet.
+    """
+    existing = request.cookies.get("session_id")
+    session_id = existing or str(uuid.uuid4())
+    game_id = request.cookies.get("game_id")
+    return session_id, existing is None, game_id
 
 
 def create_app(
@@ -439,16 +427,13 @@ def create_app(
         :param request: The incoming HTTP request.
         :returns: Rendered HTML page.
         """
-        existing_session = request.cookies.get("session_id")
-        session_id = existing_session or str(uuid.uuid4())
-        is_new_session = existing_session is None
-        game_id = request.cookies.get("game_id")
+        session_id, is_new_session, game_id = _session_from_request(request)
 
         client: Client = app.state.temporal_client
-        today = datetime.date.today()
-        workflow_id = get_workflow_id(session_id, game_date=today, game_id=game_id)
-
-        game_state = await _query_existing_game(client, workflow_id)
+        game_state: GameState | None = None
+        if game_id:
+            workflow_id = get_workflow_id(game_id)
+            game_state = await _query_existing_game(client, workflow_id)
 
         return _render_full_page(
             templates,
@@ -456,15 +441,14 @@ def create_app(
             session_id,
             is_new_session,
             game_state=game_state,
-            random_mode=game_id is not None,
         )
 
     @app.post("/play", response_class=HTMLResponse)
     async def play(
         request: Request,
-        random_mode: bool = Form(default=False),
         first_name: str | None = Form(default=None),
         last_name: str | None = Form(default=None),
+        email: str | None = Form(default=None),
         madlib_noun: str | None = Form(default=None),
         madlib_verb: str | None = Form(default=None),
     ) -> HTMLResponse:
@@ -472,36 +456,26 @@ def create_app(
 
         Creates or resumes a workflow for the current session and returns
         the game screen HTML fragment for HTMX to swap into #screen.
-        Stores player name and madlib values in cookies for leaderboard use.
+        Stores player name, email, and madlib values in cookies for leaderboard use.
 
         :param request: The incoming HTTP request.
-        :param random_mode: Whether to use random word selection.
         :param first_name: Player's first name for the leaderboard.
         :param last_name: Player's last name for the leaderboard.
+        :param email: Player's email for prize outreach (stored but not displayed).
         :param madlib_noun: The noun for the madlib phrase.
         :param madlib_verb: The past-tense verb for the madlib phrase.
         :returns: Rendered game screen HTML fragment.
         """
-        existing_session = request.cookies.get("session_id")
-        session_id = existing_session or str(uuid.uuid4())
-        is_new_session = existing_session is None
+        session_id, is_new_session, game_id = _session_from_request(request)
 
         client: Client = app.state.temporal_client
         queue: str = app.state.task_queue
-        today = datetime.date.today()
 
-        game_id = request.cookies.get("game_id")
-        if random_mode and not game_id:
+        if not game_id:
             game_id = str(uuid.uuid4())
 
-        workflow_id = get_workflow_id(
-            session_id,
-            game_date=None if random_mode else today,
-            game_id=game_id if random_mode else None,
-        )
-        handle = await _get_or_start_workflow(
-            client, workflow_id, session_id, queue, random_mode=random_mode
-        )
+        workflow_id = get_workflow_id(game_id)
+        handle = await _get_or_start_workflow(client, workflow_id, session_id, queue)
         game_state = await _wait_for_game_state(handle)
 
         response = _render_game_screen(
@@ -510,14 +484,8 @@ def create_app(
             session_id,
             is_new_session,
             game_state=game_state,
-            random_mode=random_mode,
         )
-        if random_mode and game_id:
-            response.set_cookie(key="game_id", value=game_id, httponly=True)
-        elif not random_mode:
-            # Clear any stale game_id from a previous random/new-game session so
-            # the leaderboard route can find the correct daily workflow.
-            response.delete_cookie(key="game_id")
+        response.set_cookie(key="game_id", value=game_id, httponly=True)
 
         player_name = " ".join(
             part
@@ -526,6 +494,8 @@ def create_app(
         )
         if player_name:
             response.set_cookie(key="player_name", value=player_name, httponly=True)
+        if email and email.strip():
+            response.set_cookie(key="email", value=email.strip(), httponly=True)
         if madlib_noun and madlib_noun.strip():
             response.set_cookie(
                 key="madlib_noun", value=madlib_noun.strip().upper(), httponly=True
@@ -540,7 +510,6 @@ def create_app(
     async def submit_guess(
         request: Request,
         guess: str = Form(...),
-        random_mode: bool = Form(default=False),
     ) -> HTMLResponse:
         """Process a guess submission.
 
@@ -549,29 +518,18 @@ def create_app(
 
         :param request: The incoming HTTP request.
         :param guess: The guessed word from the form.
-        :param random_mode: Whether to use random word selection.
         :returns: Rendered board partial HTML fragment.
         """
-        existing_session = request.cookies.get("session_id")
-        session_id = existing_session or str(uuid.uuid4())
-        is_new_session = existing_session is None
+        session_id, is_new_session, game_id = _session_from_request(request)
 
         client: Client = app.state.temporal_client
         queue: str = app.state.task_queue
-        today = datetime.date.today()
 
-        game_id = request.cookies.get("game_id")
-        if random_mode and not game_id:
+        if not game_id:
             game_id = str(uuid.uuid4())
 
-        workflow_id = get_workflow_id(
-            session_id,
-            game_date=None if random_mode else today,
-            game_id=game_id if random_mode else None,
-        )
-        handle = await _get_or_start_workflow(
-            client, workflow_id, session_id, queue, random_mode=random_mode
-        )
+        workflow_id = get_workflow_id(game_id)
+        handle = await _get_or_start_workflow(client, workflow_id, session_id, queue)
 
         # Send guess via Update
         error_message = ""
@@ -598,8 +556,6 @@ def create_app(
                 error_response.set_cookie(
                     key="session_id", value=session_id, httponly=True
                 )
-            if random_mode and game_id:
-                error_response.set_cookie(key="game_id", value=game_id, httponly=True)
             return error_response
 
         game_state = await handle.query(UserSessionWorkflow.get_game_state)
@@ -611,20 +567,20 @@ def create_app(
             is_new_session,
             game_state=game_state,
             error_message=error_message,
-            random_mode=random_mode,
             animate=is_htmx,
         )
-        if random_mode and game_id:
-            response.set_cookie(key="game_id", value=game_id, httponly=True)
+        response.set_cookie(key="game_id", value=game_id, httponly=True)
         return response
 
     def _leaderboard_context(request: Request) -> dict[str, Any]:
-        entries = get_top_entries()
+        today = str(datetime.date.today())
+        entries = get_top_entries_for_date(today)
         madlibs = get_madlib_pairs(entries)
         return {
             "request": request,
             "entries": entries,
             "madlibs_json": json.dumps(madlibs),
+            "game_date": today,
         }
 
     @app.post("/leaderboard", response_class=HTMLResponse)
@@ -642,16 +598,20 @@ def create_app(
             client: Client = app.state.temporal_client
             game_id = request.cookies.get("game_id")
             today = datetime.date.today()
-            workflow_id = get_workflow_id(session_id, game_date=today, game_id=game_id)
-            game_state = await _query_existing_game(client, workflow_id)
+            game_state = None
+            if game_id:
+                workflow_id = get_workflow_id(game_id)
+                game_state = await _query_existing_game(client, workflow_id)
 
             if game_state and game_state.status == "won":
                 lb_add_entry(
                     player_name=request.cookies.get("player_name", "Anonymous"),
+                    email=request.cookies.get("email", ""),
                     guesses=len(game_state.guesses),
                     started_at=game_state.started_at,
                     madlib_noun=request.cookies.get("madlib_noun", ""),
                     madlib_verb=request.cookies.get("madlib_verb", ""),
+                    game_date=str(today),
                 )
 
         return templates.TemplateResponse(

@@ -13,7 +13,7 @@ from durable_wordle.models import (
     SelectWordInput,
     ValidateGuessInput,
 )
-from durable_wordle.word_lists import ANSWER_LIST, get_daily_word
+from durable_wordle.word_lists import ANSWER_LIST, get_daily_word, is_valid_guess
 
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en"
 
@@ -29,15 +29,20 @@ def validate_guess(activity_input: ValidateGuessInput) -> bool:
     :param activity_input: The activity input containing the guess word.
     :returns: ``True`` if the guess is a real English word.
     """
-    normalized = activity_input.guess.strip().upper()
+    # Workflow normalizes before calling; the input is already uppercase.
+    word = activity_input.guess
+    # Fast path: skip the external API for words in our curated lists.
+    if is_valid_guess(word):
+        activity.logger.info("validate_guess: %s → valid (local list)", word)
+        return True
     response = requests.get(
-        f"{DICTIONARY_API_URL}/{normalized.lower()}",
+        f"{DICTIONARY_API_URL}/{word.lower()}",
         timeout=5,
     )
     is_valid: bool = response.status_code == 200
     activity.logger.info(
         "validate_guess: %s → %s (status=%d)",
-        normalized,
+        word,
         "valid" if is_valid else "invalid",
         response.status_code,
     )
@@ -81,36 +86,31 @@ def calculate_feedback(
     :param activity_input: Contains the guess and target words.
     :returns: A list of per-letter feedback values.
     """
-    normalized_guess = activity_input.guess.upper()
-    normalized_target = activity_input.target.upper()
-    word_length = len(normalized_guess)
+    guess = activity_input.guess.upper()
+    target = activity_input.target.upper()
 
-    feedback: list[LetterFeedback] = [LetterFeedback.ABSENT] * word_length
-    remaining_counts: Counter[str] = Counter(normalized_target)
+    feedback: list[LetterFeedback] = [LetterFeedback.ABSENT] * len(guess)
+    remaining_counts: Counter[str] = Counter(target)
 
     # First pass: mark exact matches (CORRECT) and decrement their counts
-    for position in range(word_length):
-        guess_letter = normalized_guess[position]
-        target_letter = normalized_target[position]
-        if guess_letter == target_letter:
+    for position in range(len(guess)):
+        if guess[position] == target[position]:
             feedback[position] = LetterFeedback.CORRECT
-            remaining_counts[guess_letter] -= 1
+            remaining_counts[guess[position]] -= 1
 
     # Second pass: mark PRESENT for non-exact positions with remaining letters
-    for position in range(word_length):
+    for position in range(len(guess)):
         if feedback[position] is LetterFeedback.CORRECT:
             continue
-        guess_letter = normalized_guess[position]
-        if remaining_counts[guess_letter] > 0:
+        if remaining_counts[guess[position]] > 0:
             feedback[position] = LetterFeedback.PRESENT
-            remaining_counts[guess_letter] -= 1
+            remaining_counts[guess[position]] -= 1
 
-    result = feedback
-    feedback_summary = "".join(fb.value[0].upper() for fb in result)
+    feedback_summary = "".join(fb.value[0].upper() for fb in feedback)
     activity.logger.info(
         "calculate_feedback: %s vs %s → %s",
-        normalized_guess,
-        normalized_target,
+        guess,
+        target,
         feedback_summary,
     )
-    return result
+    return feedback

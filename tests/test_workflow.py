@@ -39,7 +39,7 @@ class TestUserSessionWorkflow:
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -71,7 +71,7 @@ class TestUserSessionWorkflow:
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -97,7 +97,7 @@ class TestUserSessionWorkflow:
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -122,7 +122,7 @@ class TestUserSessionWorkflow:
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -147,7 +147,7 @@ class TestUserSessionWorkflow:
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -186,7 +186,7 @@ class TestUserSessionWorkflow:
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -227,7 +227,7 @@ class TestUserSessionWorkflow:
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
