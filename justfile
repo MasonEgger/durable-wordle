@@ -24,13 +24,20 @@ dev:
     }
     trap cleanup EXIT INT TERM
 
+    for port in 7233 8233 8000; do
+        if lsof -ti :"$port" >/dev/null 2>&1; then
+            echo "Port $port is already in use — stop the other process (e.g. a stray 'just dev'/'just booth') and retry." >&2
+            exit 1
+        fi
+    done
+
     temporal server start-dev --ui-port 8233 &
     temporal_pid=$!
 
     echo "Waiting for Temporal on localhost:7233..."
     until temporal operator cluster health --address localhost:7233 >/dev/null 2>&1; do
         if ! kill -0 "$temporal_pid" 2>/dev/null; then
-            wait "$temporal_pid"
+            echo "Temporal failed to start." >&2; exit 1
         fi
         sleep 1
     done
@@ -45,14 +52,13 @@ dev:
     echo "Temporal UI:    http://localhost:8233"
     echo "Press Ctrl-C to stop all processes."
 
-    while true; do
-        for pid in "$temporal_pid" "$worker_pid" "$ui_pid"; do
-            if ! kill -0 "$pid" 2>/dev/null; then
-                wait "$pid"
-            fi
-        done
+    # Stay up while all three live; exit cleanly (trap cleans up) if any dies.
+    while kill -0 "$temporal_pid" 2>/dev/null \
+       && kill -0 "$worker_pid" 2>/dev/null \
+       && kill -0 "$ui_pid" 2>/dev/null; do
         sleep 1
     done
+    echo "A process exited — shutting down the stack." >&2
 
 # Full booth mode: start the stack, then open the game + display in Firefox kiosks.
 booth:
@@ -72,12 +78,19 @@ booth:
     }
     trap cleanup EXIT INT TERM
 
+    for port in 7233 8233 8000; do
+        if lsof -ti :"$port" >/dev/null 2>&1; then
+            echo "Port $port is already in use — stop the other process (e.g. a stray 'just dev'/'just booth') and retry." >&2
+            exit 1
+        fi
+    done
+
     temporal server start-dev --ui-port 8233 &
     temporal_pid=$!
 
     echo "Waiting for Temporal on localhost:7233..."
     until temporal operator cluster health --address localhost:7233 >/dev/null 2>&1; do
-        if ! kill -0 "$temporal_pid" 2>/dev/null; then wait "$temporal_pid"; fi
+        if ! kill -0 "$temporal_pid" 2>/dev/null; then echo "Temporal failed to start." >&2; exit 1; fi
         sleep 1
     done
 
@@ -89,7 +102,7 @@ booth:
 
     echo "Waiting for the web app on localhost:8000..."
     until curl -fs http://localhost:8000/health >/dev/null 2>&1; do
-        if ! kill -0 "$ui_pid" 2>/dev/null; then wait "$ui_pid"; fi
+        if ! kill -0 "$ui_pid" 2>/dev/null; then echo "Web app failed to start." >&2; exit 1; fi
         sleep 1
     done
 
@@ -114,12 +127,13 @@ booth:
     echo "Note: drag each kiosk window onto its fan if they open on the same screen."
     echo "Press Ctrl-C to stop the stack."
 
-    while true; do
-        for pid in "$temporal_pid" "$worker_pid" "$ui_pid"; do
-            if ! kill -0 "$pid" 2>/dev/null; then wait "$pid"; fi
-        done
+    # Stay up while all three live; exit cleanly (trap cleans up) if any dies.
+    while kill -0 "$temporal_pid" 2>/dev/null \
+       && kill -0 "$worker_pid" 2>/dev/null \
+       && kill -0 "$ui_pid" 2>/dev/null; do
         sleep 1
     done
+    echo "A process exited — shutting down the stack." >&2
 
 ui:
     uv run uvicorn --factory durable_wordle.api:create_production_app --reload
