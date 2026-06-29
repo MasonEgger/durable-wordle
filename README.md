@@ -111,7 +111,11 @@ For Temporal Cloud, set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and `TEMPORAL_
 
 ## Second Screen (Holographic Display)
 
-Open **http://localhost:8000/display** in a second browser window for a companion screen designed for the booth's holographic fans (dark background, high contrast, centered content). It self-switches between two modes by polling `GET /api/active-game` every 2 seconds:
+Open **http://localhost:8000/display** in a second browser window for a companion screen designed for the booth's holographic fans (dark background, high contrast, centered content). `just booth` starts the whole stack and opens both the game and this display in Firefox kiosk windows.
+
+**Calibration:** the display opens on a calibration overlay — concentric rings and a crosshair to align against the fan's visible circle, plus a width box previewing the timeline. Use the arrow keys (or on-screen D-pad) to re-center, `[`/`]` to resize, then **Save & Launch**. The values persist in `localStorage`, so on later launches you just confirm. Under the hood these map to CSS knobs (`--shift-x`, `--shift-y`, `--circle-w`).
+
+Once launched it self-switches between two modes by polling `GET /api/active-game` every 2 seconds:
 
 - **Attract mode** (no game running) — cycles a floating Ziggy + Temporal logo, the players' madlib phrases, and the live leaderboard.
 - **Game mode** (a game is running) — shows only the live Temporal **workflow timeline**. The Temporal UI is same-origin-proxied under `/temporal-ui/` (the app strips `X-Frame-Options`/CSP so it can be embedded), and the page extracts just the timeline SVG from a hidden iframe, re-cloning it every 1.5s so it stays live as events arrive.
@@ -172,6 +176,7 @@ Each game gets a random word via the `select_word` activity, so two sessions won
 ```bash
 just check      # lint + typecheck + test (the gate)
 just dev        # start Temporal server + worker + web UI together
+just booth      # just dev + open the game and display in Firefox kiosk windows
 just server     # start Temporal local dev server
 just worker     # start Temporal worker
 just ui         # start FastAPI web server

@@ -25,6 +25,7 @@ just lint       # uv run ruff check src/ tests/
 just typecheck  # uv run mypy src/
 just format     # uv run ruff format src/ tests/
 just dev        # start Temporal server + worker + FastAPI UI together (one command)
+just booth      # like `just dev`, plus launch Firefox kiosks for the game + display
 just worker     # start Temporal worker
 just server     # start Temporal local dev server (temporal server start-dev)
 just ui         # start FastAPI dev server (uvicorn --reload)
