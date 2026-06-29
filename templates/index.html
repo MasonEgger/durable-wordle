@@ -234,8 +234,15 @@
             }
             return;
         }
-        var form = document.getElementById('guess-form');
-        if (form) htmx.trigger(form, 'submit');
+        // Post the guess explicitly. htmx.trigger(form, 'submit') fires a
+        // synthetic submit that HTMX 2.x does NOT serialize, so the `guess`
+        // field was missing → 422. Passing values guarantees it's sent.
+        if (!document.getElementById('guess-form')) return;
+        htmx.ajax('POST', '/guess', {
+            target: '#game-content',
+            swap: 'innerHTML',
+            values: { guess: currentGuess }
+        });
     }
 
     document.addEventListener('click', function(event) {
