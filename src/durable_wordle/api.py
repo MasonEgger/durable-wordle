@@ -647,6 +647,56 @@ def create_app(
             request=request, name="_start_screen.html", context={}
         )
 
+    @app.get("/api/active-game")
+    async def active_game(request: Request) -> dict[str, str | None]:
+        """Return the currently running game workflow ID and run ID, if any.
+
+        Lists today's running ``wordle-random-*`` workflows and returns the
+        most recently started one. Returns ``null`` values when no game is active.
+
+        :param request: The incoming HTTP request.
+        :returns: Dict with ``workflow_id`` and ``run_id``, or nulls if idle.
+        """
+        client: Client = request.app.state.temporal_client
+        today = datetime.datetime.now(_LA_TZ).strftime("%Y-%m-%d")
+        query = (
+            f'WorkflowType="UserSessionWorkflow" AND ExecutionStatus="Running"'
+            f' AND WorkflowId STARTS_WITH "wordle-{today}-"'
+        )
+        try:
+            async for execution in client.list_workflows(query):
+                return {
+                    "workflow_id": execution.id,
+                    "run_id": execution.run_id,
+                }
+        except Exception:
+            pass
+        return {"workflow_id": None, "run_id": None}
+
+    @app.get("/display", response_class=HTMLResponse)
+    async def display(request: Request) -> HTMLResponse:
+        """Render the holographic display page for the second screen.
+
+        Shows attract mode (leaderboard + madlib cycling) when no game is
+        active, and the Temporal timeline iframe during an active game.
+
+        :param request: The incoming HTTP request.
+        :returns: Rendered display HTML page.
+        """
+        today = datetime.datetime.now(_LA_TZ).strftime("%Y-%m-%d")
+        entries = get_top_entries_for_date(today)
+        madlibs = get_madlib_pairs(entries)
+        return templates.TemplateResponse(
+            request=request,
+            name="display.html",
+            context={
+                "request": request,
+                "entries": entries,
+                "madlibs_json": json.dumps(madlibs),
+                "game_date": today,
+            },
+        )
+
     return app
 
 
