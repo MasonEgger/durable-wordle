@@ -118,7 +118,7 @@ class UserSessionWorkflow:
         :raises ApplicationError: If the game is over, guess is invalid format,
             or word is not in the dictionary.
         """
-        # Wait for the select_daily_word activity to finish initializing state
+        # Wait for the select_word activity to finish initializing state
         await workflow.wait_condition(lambda: self._game_state is not None)
 
         normalized_guess = guess_input.guess.strip().upper()

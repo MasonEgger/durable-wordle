@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import json
 import os
+import re
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -36,6 +37,17 @@ from durable_wordle.models import (
 from durable_wordle.workflow import UserSessionWorkflow
 
 _LA_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def _today_la() -> str:
+    """Return today's date in the booth timezone as an ISO ``YYYY-MM-DD`` string.
+
+    Single source for the leaderboard's daily-rollover boundary so every caller
+    agrees on which day an entry belongs to.
+
+    :returns: ISO date string in America/Los_Angeles.
+    """
+    return datetime.datetime.now(_LA_TZ).strftime("%Y-%m-%d")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
@@ -610,7 +622,7 @@ def create_app(
         return response
 
     def _leaderboard_context(request: Request) -> dict[str, Any]:
-        today = str(datetime.datetime.now(_LA_TZ).date())
+        today = _today_la()
         entries = get_top_entries_for_date(today)
         madlibs = get_madlib_pairs(entries)
         return {
@@ -634,7 +646,6 @@ def create_app(
         if session_id:
             client: Client = app.state.temporal_client
             game_id = request.cookies.get("game_id")
-            today = datetime.datetime.now(_LA_TZ).date()
             game_state = None
             if game_id:
                 workflow_id = get_workflow_id(game_id)
@@ -648,7 +659,7 @@ def create_app(
                     started_at=game_state.started_at,
                     madlib_noun=request.cookies.get("madlib_noun", ""),
                     madlib_verb=request.cookies.get("madlib_verb", ""),
-                    game_date=str(today),
+                    game_date=_today_la(),
                 )
 
         return templates.TemplateResponse(
@@ -720,8 +731,6 @@ def create_app(
         :param request: The incoming HTTP request.
         :returns: Proxied response with frame-busting headers removed.
         """
-        import re
-
         query = request.url.query
         target_url = f"http://localhost:8233/{upstream_path}"
         if query:
@@ -846,7 +855,7 @@ def create_app(
         :param request: The incoming HTTP request.
         :returns: Rendered display HTML page.
         """
-        today = datetime.datetime.now(_LA_TZ).strftime("%Y-%m-%d")
+        today = _today_la()
         entries = get_top_entries_for_date(today)
         madlibs = get_madlib_pairs(entries)
         return templates.TemplateResponse(
@@ -874,8 +883,6 @@ def create_production_app() -> FastAPI:
 
     :returns: A configured FastAPI application instance.
     """
-    from pathlib import Path
-
     from temporalio.envconfig import ClientConfigProfile
 
     config_file = Path(__file__).resolve().parent.parent.parent / "temporal.toml"
