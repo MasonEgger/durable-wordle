@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -32,6 +33,8 @@ from durable_wordle.models import (
     WorkflowInput,
 )
 from durable_wordle.workflow import UserSessionWorkflow
+
+_LA_TZ = ZoneInfo("America/Los_Angeles")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
@@ -573,7 +576,7 @@ def create_app(
         return response
 
     def _leaderboard_context(request: Request) -> dict[str, Any]:
-        today = str(datetime.date.today())
+        today = str(datetime.datetime.now(_LA_TZ).date())
         entries = get_top_entries_for_date(today)
         madlibs = get_madlib_pairs(entries)
         return {
@@ -597,7 +600,7 @@ def create_app(
         if session_id:
             client: Client = app.state.temporal_client
             game_id = request.cookies.get("game_id")
-            today = datetime.date.today()
+            today = datetime.datetime.now(_LA_TZ).date()
             game_state = None
             if game_id:
                 workflow_id = get_workflow_id(game_id)

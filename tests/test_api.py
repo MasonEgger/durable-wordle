@@ -236,14 +236,14 @@ class TestTemplateRendering:
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
-                    # ABOVE against daily word — some letters may be present
+                    # ABOVE against random word — any feedback class is fine
                     response = await client.post("/guess", data={"guess": "ABOVE"})
                     body = response.text
-                    # At minimum we should see green, amber, or slate tiles
+                    # All 5 tiles get some feedback class — at minimum absent
                     has_feedback = (
                         "bg-green-500" in body
                         or "bg-amber-500" in body
-                        or "bg-slate-600" in body
+                        or "bg-wordle-absent" in body
                     )
                     assert has_feedback
 

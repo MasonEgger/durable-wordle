@@ -128,6 +128,50 @@ def add_entry(
     return get_top_entries_for_date(game_date)
 
 
+_SEED_PLAYER = "Shy Ruparel"
+_SEED_NOUN = "CODE"
+_SEED_VERB = "FAILS"
+_SEED_ELAPSED = 599  # 9:59 — last-place floor entry
+
+
+def _ensure_seed_entry(game_date: str) -> None:
+    """Insert the default last-place entry for game_date if it doesn't exist yet.
+
+    :param game_date: ISO date string (YYYY-MM-DD) to seed.
+    """
+    _ensure_schema()
+    with _connect() as conn:
+        count: int = conn.execute(
+            """
+            SELECT COUNT(*) FROM entries
+            WHERE  game_date    = ?
+              AND  player_name  = ?
+              AND  madlib_noun  = ?
+              AND  madlib_verb  = ?
+            """,
+            (game_date, _SEED_PLAYER, _SEED_NOUN, _SEED_VERB),
+        ).fetchone()[0]
+        if count == 0:
+            conn.execute(
+                """
+                INSERT INTO entries
+                    (player_name, email, guesses, elapsed_seconds,
+                     madlib_noun, madlib_verb, submitted_at, game_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _SEED_PLAYER,
+                    "",
+                    6,
+                    _SEED_ELAPSED,
+                    _SEED_NOUN,
+                    _SEED_VERB,
+                    datetime(2000, 1, 1, tzinfo=UTC).isoformat(),
+                    game_date,
+                ),
+            )
+
+
 def get_top_entries_for_date(game_date: str, n: int = TOP_N) -> list[LeaderboardEntry]:
     """Return the top N entries for a given game day.
 
@@ -137,7 +181,7 @@ def get_top_entries_for_date(game_date: str, n: int = TOP_N) -> list[Leaderboard
     :param n: Maximum number of entries to return.
     :returns: Top N leaderboard entries for the day.
     """
-    _ensure_schema()
+    _ensure_seed_entry(game_date)
     with _connect() as conn:
         rows = conn.execute(
             """
