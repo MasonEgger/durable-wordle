@@ -8,6 +8,8 @@ A Wordle clone where each game session is a [Temporal](https://temporal.io) work
 
 Close the browser, reopen it, and your game is still there. That's durable execution.
 
+The booth experience adds a madlib start screen, a SQLite-backed leaderboard (the only persistence — used for scores and prize outreach, never for game state), and a [second-screen "holographic" display](#second-screen-holographic-display) that shows the live Temporal workflow timeline while someone plays and cycles fun animations when idle.
+
 ## Temporal Concepts Demonstrated
 
 | Concept | What It Does Here | Where to Look |
@@ -17,6 +19,7 @@ Close the browser, reopen it, and your game is still there. That's durable execu
 | **Queries** | Read-only game board retrieval, safe to call any time | `workflow.py` → `get_game_state()` |
 | **Activities** | Word selection, guess validation (dictionary API), and feedback calculation — each visible in event history | `activities.py` |
 | **Durable Execution** | Workflow holds state in memory; worker restarts replay history to rebuild state with zero data loss | `workflow.py` → `run()` |
+| **Workflow Completion** | The workflow completes when the player wins, loses, or goes idle past the inactivity timeout — then it's no longer `RUNNING` | `workflow.py` → `run()` |
 
 ## Architecture
 
@@ -25,14 +28,15 @@ flowchart LR
     Browser -->|cookie| FastAPI
     FastAPI -->|start / Update / Query| Temporal
     Temporal --> UserSessionWorkflow
-    UserSessionWorkflow --> select_daily_word["select_daily_word (Activity)"]
+    UserSessionWorkflow --> select_word["select_word (Activity)"]
     UserSessionWorkflow --> validate_guess["validate_guess (Activity)"]
     UserSessionWorkflow --> calculate_feedback["calculate_feedback (Activity)"]
 ```
 
-- **One workflow per game session** — cookie holds a session UUID, workflow ID = `wordle-{date}-{session_id}`
-- **No database** — the workflow's event history is the source of truth
-- **Daily or random mode** — daily mode uses `workflow.now()` + an activity; random mode uses `workflow.random()` for deterministic replay
+- **One workflow per game session** — cookie holds a session UUID; workflow ID is `wordle-{date}-{session_id}` (or `wordle-random-{game_id}`)
+- **The workflow is the game state** — event history is the source of truth; the only database is a small SQLite leaderboard for scores
+- **Random word per game** — `select_word` picks a random answer; the workflow uses `workflow.random()`/`workflow.now()` for deterministic replay
+- **Inactivity timeout** — a game with no guesses for 60s completes as `abandoned`, so the booth display returns to idle and stale workflows don't pile up
 - **Fully playable via CLI** — the workflow is the complete game; the web UI is just a skin (see [Playing via Temporal CLI](#playing-via-temporal-cli))
 
 ## Prerequisites
@@ -96,6 +100,15 @@ Connection settings use Temporal's standard [`envconfig`](https://docs.temporal.
 
 For Temporal Cloud, set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and `TEMPORAL_API_KEY` (or mTLS certs). See the [Temporal docs](https://docs.temporal.io/develop/python/temporal-client#connect-to-temporal-cloud) for details.
 
+## Second Screen (Holographic Display)
+
+Open **http://localhost:8000/display** in a second browser window for a companion screen designed for the booth's holographic fans (dark background, high contrast, centered content). It self-switches between two modes by polling `GET /api/active-game` every 2 seconds:
+
+- **Attract mode** (no game running) — cycles a floating Ziggy + Temporal logo, the players' madlib phrases, and the live leaderboard.
+- **Game mode** (a game is running) — shows only the live Temporal **workflow timeline**. The Temporal UI is same-origin-proxied under `/temporal-ui/` (the app strips `X-Frame-Options`/CSP so it can be embedded), and the page extracts just the timeline SVG from a hidden iframe, re-cloning it every 1.5s so it stays live as events arrive.
+
+The display tracks the most recently started running workflow, and `POST /play` terminates any other running game so only one is ever active at the booth. When the game ends (win/loss/timeout), the display returns to attract mode automatically.
+
 ## Playing via Temporal CLI
 
 The workflow is the complete game — you don't need the web UI. With a Temporal dev server and worker running, you can play entirely from the command line.
@@ -107,7 +120,7 @@ temporal workflow start \
   --type UserSessionWorkflow \
   --task-queue wordle-tasks \
   --workflow-id wordle-cli-game \
-  --input '{"session_id": "cli-test", "random_mode": true}'
+  --input '{"session_id": "cli-test"}'
 ```
 
 ### Make a guess
@@ -143,17 +156,7 @@ temporal workflow show --workflow-id wordle-cli-game
 
 Every step is visible: the word selection activity, each guess's validation and feedback activities, and the final game result.
 
-### Start a daily game (same word for everyone)
-
-```bash
-temporal workflow start \
-  --type UserSessionWorkflow \
-  --task-queue wordle-tasks \
-  --workflow-id wordle-daily-$(date +%Y-%m-%d)-player1 \
-  --input '{"session_id": "player1"}'
-```
-
-Omitting `random_mode` (or setting it to `false`) uses the daily word — determined by `workflow.now()` and an activity, so every player on the same day gets the same word.
+Each game gets a random word via the `select_word` activity, so two sessions won't share an answer.
 
 ## Development
 
@@ -188,6 +191,7 @@ docker compose down
 ## Tech Stack
 
 - **Backend:** Temporal Python SDK, FastAPI, Jinja2
-- **Frontend:** HTMX, Tailwind CSS (CDN)
+- **Frontend:** HTMX, Tailwind CSS (CDN), Space Mono
+- **Persistence:** SQLite — leaderboard scores only; game state lives in the workflow
 - **Package management:** uv
 - **Task runner:** just
