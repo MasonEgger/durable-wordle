@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Durable Wordle — Display</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    'temporal-grellow': '#cfff0d',
+                    'temporal-indigo': '#cacbf9',
+                    'temporal-black': '#141414',
+                    'wordle-absent': '#2d3458',
+                },
+                fontFamily: { 'mono': ['"Space Mono"', 'monospace'] }
+            }
+        }
+    }
+    </script>
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0;
+            background: #0a0a0a;
+            color: #f8fafc;
+            font-family: '"Space Mono"', monospace;
+            overflow: hidden;
+            width: 100vw; height: 100vh;
+        }
+
+        /* ── Attract mode ────────────────────────────────────── */
+        #attract { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; }
+        #attract.hidden { display: none; }
+
+        /* Segment panels — stacked, one visible at a time */
+        .attract-panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.5rem; opacity: 0; transition: opacity 0.6s ease; pointer-events: none; }
+        .attract-panel.active { opacity: 1; pointer-events: auto; }
+
+        /* Ziggy float animation */
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-14px); }
+        }
+        .ziggy-float { animation: float 3s ease-in-out infinite; }
+
+        /* Particle field */
+        #particles { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+        .particle {
+            position: absolute;
+            border-radius: 50%;
+            background: #cfff0d;
+            opacity: 0;
+            animation: drift linear infinite;
+        }
+        @keyframes drift {
+            0%   { transform: translateY(110vh) scale(0.5); opacity: 0; }
+            10%  { opacity: 0.6; }
+            90%  { opacity: 0.3; }
+            100% { transform: translateY(-10vh) scale(1.2); opacity: 0; }
+        }
+
+        /* Madlib panel */
+        #madlib-panel .phrase-wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem; }
+        .madlib-chip {
+            padding: 0.25rem 0.75rem;
+            border: 2px solid #cfff0d;
+            color: #cfff0d;
+            font-weight: 700;
+            border-radius: 4px;
+            letter-spacing: 0.12em;
+            font-size: 1.5rem;
+            transition: all 0.4s ease;
+        }
+        .phrase-text { color: #94a3b8; font-size: 1.4rem; }
+        #madlib-area { transition: opacity 0.4s ease; }
+
+        /* Leaderboard panel */
+        #leaderboard-panel .lb-row { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 0; border-bottom: 1px solid #2a2a2c; width: 100%; max-width: 520px; }
+        #leaderboard-panel .lb-rank { width: 2.5rem; text-align: center; font-weight: 700; font-size: 1.1rem; flex-shrink: 0; }
+        #leaderboard-panel .lb-name { flex: 1; font-size: 1rem; font-weight: 700; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #leaderboard-panel .lb-guesses { font-size: 0.75rem; color: #64748b; flex-shrink: 0; width: 5rem; text-align: right; }
+        #leaderboard-panel .lb-time { font-size: 1rem; font-weight: 700; color: #cfff0d; flex-shrink: 0; width: 5rem; text-align: right; }
+        #leaderboard-panel .lb-row.top { padding: 0.8rem 0; }
+        #leaderboard-panel .lb-row.top .lb-name { font-size: 1.1rem; }
+
+        /* Logo pulse */
+        @keyframes logoPulse {
+            0%, 100% { opacity: 0.8; transform: scale(1); filter: drop-shadow(0 0 8px #cfff0d44); }
+            50% { opacity: 1; transform: scale(1.04); filter: drop-shadow(0 0 24px #cfff0d99); }
+        }
+        #logo-panel svg, #logo-panel img { animation: logoPulse 2.5s ease-in-out infinite; }
+
+        /* Dot progress indicator */
+        #attract-dots { display: flex; gap: 0.5rem; position: absolute; bottom: 2rem; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #3a3a3c; transition: background 0.3s; }
+        .dot.active { background: #cfff0d; }
+
+        /* ── Game mode ───────────────────────────────────────── */
+        #game-mode { position: absolute; inset: 0; display: flex; flex-direction: column; }
+        #game-mode.hidden { display: none; }
+
+        #timeline-bar {
+            display: flex; align-items: center; gap: 1rem;
+            padding: 0.75rem 1.5rem;
+            background: #111;
+            border-bottom: 1px solid #2a2a2c;
+            flex-shrink: 0;
+        }
+        #timeline-bar .live-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: #cfff0d;
+            animation: pulse 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #cfff0d66; }
+            50% { opacity: 0.7; box-shadow: 0 0 0 6px transparent; }
+        }
+        #timeline-bar .bar-label { font-family: '"Space Mono"', monospace; font-size: 0.7rem; letter-spacing: 0.15em; color: #94a3b8; text-transform: uppercase; }
+        #timeline-bar .wf-id { font-family: '"Space Mono"', monospace; font-size: 0.65rem; color: #cfff0d; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        #timeline-frame { flex: 1; border: none; }
+    </style>
+</head>
+<body>
+
+<!-- Particle field (shared background) -->
+<div id="particles"></div>
+
+<!-- ── ATTRACT MODE ─────────────────────────────────────────────────────── -->
+<div id="attract">
+
+    <!-- Panel 0: Logo / idle -->
+    <div class="attract-panel active" id="logo-panel">
+        <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:2rem;">
+            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float" style="width:160px; height:160px; object-fit:contain;">
+            <svg viewBox="404 395 1568 410" fill="none" xmlns="http://www.w3.org/2000/svg" style="height:3rem; width:auto; color:#cfff0d;" aria-label="Temporal">
+                <path d="M915 519V538.047H970.006V684.703H990.72V538.047H1045.73V519H915Z" fill="currentColor"/>
+                <path d="M1050.01 624.95C1050.01 661.132 1073.82 686.131 1110.25 686.131C1137.38 686.131 1159.3 669.235 1164.06 644.95H1144.3C1140.25 660.663 1125 668.751 1108.82 668.751C1086.2 668.751 1071.2 653.037 1070.48 630.426V628.759H1164.77C1165.01 625.902 1165.24 623.045 1165.24 620.426C1164.29 584.475 1140.95 562.809 1107.63 562.809C1073.34 562.809 1050.01 587.57 1050.01 624.95ZM1071.67 612.569C1073.58 592.808 1090.01 579.951 1107.86 579.951C1127.14 579.951 1142.39 591.617 1144.29 612.569H1071.67Z" fill="currentColor"/>
+                <path d="M1335.55 562.809C1313.88 562.809 1300.79 572.808 1293.41 585.903C1286.5 570.427 1271.98 562.809 1255.07 562.809C1236.26 562.809 1226.03 572.094 1219.6 580.903L1217.94 564.237H1200.07V684.703H1219.6V621.617C1219.6 597.332 1231.74 580.665 1251.74 580.665C1270.31 580.665 1281.03 593.046 1281.03 616.855V684.703H1300.55V620.664C1300.55 595.903 1312.93 580.665 1333.17 580.665C1351.5 580.665 1361.98 593.046 1361.98 616.855V684.703H1381.5V615.664C1381.5 577.332 1360.79 562.809 1335.55 562.809Z" fill="currentColor"/>
+                <path d="M1478.41 562.809C1457.93 562.809 1444.84 572.57 1436.74 583.76L1435.08 564.237H1417.22V732.321H1436.74V666.132C1444.12 677.798 1457.93 686.131 1478.41 686.131C1511.02 686.131 1536.74 661.132 1536.74 624.95C1536.74 585.427 1511.02 562.809 1478.41 562.809ZM1476.5 668.751C1452.69 668.751 1436.5 650.18 1436.5 624.474C1436.5 598.522 1452.69 580.189 1476.5 580.189C1499.59 580.189 1516.74 598.522 1516.74 624.95C1516.74 650.418 1499.59 668.751 1476.5 668.751Z" fill="currentColor"/>
+                <path d="M1624.65 686.131C1660.13 686.131 1684.89 660.894 1684.89 624.95C1684.89 588.046 1660.13 562.809 1624.65 562.809C1589.18 562.809 1564.41 624.95C1564.41 660.894 1589.18 686.131 1624.65 686.131ZM1624.65 668.751C1600.6 668.751 1584.41 649.942 1584.41 624.95C1584.41 598.998 1600.6 580.189 1624.65 580.189C1648.7 580.189 1664.89 598.998 1664.89 624.95C1664.89 649.942 1648.7 668.751 1624.65 668.751Z" fill="currentColor"/>
+                <path d="M1773.12 564.237C1751.45 564.237 1740.24 573.284 1734.53 582.57L1732.87 564.237H1715.01V684.703H1734.53V623.759C1734.53 604.474 1743.35 583.284 1768.83 583.284H1778.59V564.237H1773.12Z" fill="currentColor"/>
+                <path d="M1908.98 665.886C1903.98 665.886 1900.88 663.989 1900.88 658.037V606.617C1900.88 578.284 1883.99 562.809 1853.03 562.809C1823.75 562.809 1804.46 576.856 1801.61 600.665H1821.13C1823.51 588.284 1834.94 580.189 1852.08 580.189C1871.13 580.189 1881.36 589.713 1881.36 605.427V613.76H1846.61C1814.7 613.76 1797.8 626.371 1797.8 650.656C1797.8 672.798 1815.89 686.131 1842.56 686.131C1863.51 686.131 1874.69 676.846 1882.31 665.894C1882.55 677.798 1888.03 684.703 1904.22 684.703H1914.93V665.886H1908.98ZM1881.36 635.18C1881.36 655.418 1868.27 669.465 1843.99 669.465C1827.8 669.465 1817.56 661.37 1817.56 649.466C1817.56 635.656 1827.32 630.188 1844.7 630.188H1881.36V635.18Z" fill="currentColor"/>
+                <path d="M1942.63 519V684.703H1962.15V519H1942.63Z" fill="currentColor"/>
+                <path d="M677.375 531.625C668.152 462.648 644.892 405 609 405C573.208 405 549.848 462.648 540.625 531.625C471.648 540.848 414 564.108 414 600C414 635.792 471.648 659.152 540.625 668.375C549.848 737.352 573.108 795 609 795C644.792 795 668.152 737.352 677.375 668.375C746.352 659.152 804 635.892 804 600C804 564.108 746.352 540.748 677.375 531.625ZM538.419 648.123C472.35 638.599 433.751 616.743 433.751 599.9C433.751 583.057 472.249 561.201 538.419 551.676C536.915 567.617 536.213 583.859 536.213 599.9C536.213 615.941 536.915 632.283 538.419 648.123ZM609 424.65C625.843 424.65 647.699 463.149 657.224 529.319C641.283 527.815 625.041 527.113 609 527.113C592.959 527.113 576.717 527.915 560.776 529.319C570.301 463.249 592.157 424.65 609 424.65ZM679.581 648.123C676.373 648.625 662.938 650.129 659.63 650.53C659.329 653.938 657.725 667.272 657.224 670.481C647.699 736.55 625.843 775.149 609 775.149C592.157 775.149 570.301 736.65 560.776 670.481C560.275 667.272 558.771 653.838 558.37 650.53C556.866 634.889 555.864 618.046 555.864 599.9C555.864 581.753 556.766 565.01 558.37 549.27C574.01 547.766 590.853 546.763 609 546.763C627.147 546.763 643.889 547.666 659.63 549.27C663.039 549.571 676.373 551.175 679.581 551.676C745.65 561.201 784.249 583.057 784.249 599.9C784.249 616.743 745.65 638.599 679.581 648.123Z" fill="currentColor"/>
+            </svg>
+            <p class="font-mono text-xs tracking-widest" style="color:#64748b; text-transform:uppercase;">Durable Wordle</p>
+        </div>
+    </div>
+
+    <!-- Panel 1: Madlib cycling -->
+    <div class="attract-panel" id="madlib-panel">
+        <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:2rem;">
+            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float" style="width:120px; height:120px; object-fit:contain;">
+            <div id="madlib-area" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:0.5rem;">
+                <span class="phrase-text" style="font-family:'Space Mono',monospace;">What if your</span>
+                <span class="madlib-chip" id="madlib-noun">CODE</span>
+                <span class="phrase-text" style="font-family:'Space Mono',monospace;">never</span>
+                <span class="madlib-chip" id="madlib-verb">FAILED</span>
+                <span class="phrase-text" style="font-family:'Space Mono',monospace;">?</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel 2: Leaderboard -->
+    <div class="attract-panel" id="leaderboard-panel">
+        <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:1rem; width:100%; max-width:560px; padding:0 2rem;">
+            <p class="font-mono text-xs tracking-widest" style="color:#64748b; text-transform:uppercase;">{{ game_date }} · Today's Leaderboard</p>
+            {% if entries %}
+            <div style="width:100%;">
+                {% for entry in entries[:10] %}
+                <div class="lb-row {% if loop.index <= 3 %}top{% endif %}">
+                    <span class="lb-rank" style="{% if loop.index == 1 %}font-size:1.4rem;{% elif loop.index == 2 or loop.index == 3 %}font-size:1.2rem;{% else %}color:#64748b;{% endif %}">
+                        {%- if loop.index == 1 %}🥇{%- elif loop.index == 2 %}🥈{%- elif loop.index == 3 %}🥉{%- else %}{{ loop.index }}.{%- endif -%}
+                    </span>
+                    <span class="lb-name">{{ entry.player_name }}</span>
+                    <span class="lb-guesses">{{ entry.guesses }} word{{ "s" if entry.guesses != 1 }}</span>
+                    <span class="lb-time">{{ entry.elapsed_formatted }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="font-mono text-sm" style="color:#64748b; text-align:center; padding:2rem 0;">No scores yet today. Be the first!</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Progress dots -->
+    <div id="attract-dots">
+        <div class="dot active" id="dot-0"></div>
+        <div class="dot" id="dot-1"></div>
+        <div class="dot" id="dot-2"></div>
+    </div>
+</div>
+
+<!-- ── GAME MODE ──────────────────────────────────────────────────────────── -->
+<div id="game-mode" class="hidden">
+    <div id="timeline-bar">
+        <div class="live-dot"></div>
+        <span class="bar-label">Live Workflow</span>
+        <span class="wf-id" id="wf-id-label">—</span>
+        <svg viewBox="404 395 1568 410" fill="none" xmlns="http://www.w3.org/2000/svg" style="height:1.2rem; width:auto; color:#cfff0d; flex-shrink:0;" aria-label="Temporal">
+            <path d="M915 519V538.047H970.006V684.703H990.72V538.047H1045.73V519H915Z" fill="currentColor"/>
+            <path d="M677.375 531.625C668.152 462.648 644.892 405 609 405C573.208 405 549.848 462.648 540.625 531.625C471.648 540.848 414 564.108 414 600C414 635.792 471.648 659.152 540.625 668.375C549.848 737.352 573.108 795 609 795C644.792 795 668.152 737.352 677.375 668.375C746.352 659.152 804 635.892 804 600C804 564.108 746.352 540.748 677.375 531.625Z" fill="currentColor"/>
+        </svg>
+    </div>
+    <iframe id="timeline-frame" src="about:blank" allow="same-origin"></iframe>
+</div>
+
+<script>
+(function () {
+    // ── Config ─────────────────────────────────────────────────────────────
+    var POLL_INTERVAL_MS   = 2000;
+    var LOGO_DURATION_MS   = 4000;
+    var MADLIB_DURATION_MS = 6000;
+    var LB_DURATION_MS     = 8000;
+    var FADE_MS            = 400;
+    var TEMPORAL_UI        = 'http://localhost:8233';
+
+    // ── Madlib data ────────────────────────────────────────────────────────
+    var madlibs = {{ madlibs_json | safe }};
+    var madlibIndex = 0;
+
+    function nextMadlib() {
+        if (!madlibs || madlibs.length === 0) return;
+        madlibIndex = (madlibIndex + 1) % madlibs.length;
+        var area = document.getElementById('madlib-area');
+        area.style.opacity = '0';
+        setTimeout(function () {
+            document.getElementById('madlib-noun').textContent = madlibs[madlibIndex][0];
+            document.getElementById('madlib-verb').textContent = madlibs[madlibIndex][1];
+            area.style.opacity = '1';
+        }, FADE_MS);
+    }
+
+    // Seed first madlib from data if available
+    if (madlibs && madlibs.length > 0) {
+        document.getElementById('madlib-noun').textContent = madlibs[0][0];
+        document.getElementById('madlib-verb').textContent = madlibs[0][1];
+    }
+
+    // ── Attract mode cycle ─────────────────────────────────────────────────
+    var PANELS = ['logo-panel', 'madlib-panel', 'leaderboard-panel'];
+    var DURATIONS = [LOGO_DURATION_MS, MADLIB_DURATION_MS, LB_DURATION_MS];
+    var currentPanel = 0;
+    var attractTimer = null;
+    var madlibCycleTimer = null;
+
+    function showPanel(index) {
+        PANELS.forEach(function (id, panelIndex) {
+            var el = document.getElementById(id);
+            el.classList.toggle('active', panelIndex === index);
+        });
+        for (var dotIndex = 0; dotIndex < 3; dotIndex++) {
+            var dot = document.getElementById('dot-' + dotIndex);
+            if (dot) dot.classList.toggle('active', dotIndex === index);
+        }
+        currentPanel = index;
+    }
+
+    function advanceAttract() {
+        var nextPanel = (currentPanel + 1) % PANELS.length;
+        showPanel(nextPanel);
+        if (nextPanel === 1) nextMadlib(); // refresh madlib on each visit
+        attractTimer = setTimeout(advanceAttract, DURATIONS[nextPanel]);
+    }
+
+    function startAttract() {
+        document.getElementById('attract').classList.remove('hidden');
+        document.getElementById('game-mode').classList.add('hidden');
+        showPanel(0);
+        if (attractTimer) clearTimeout(attractTimer);
+        attractTimer = setTimeout(advanceAttract, DURATIONS[0]);
+        // Madlib inner cycle — swap phrase every MADLIB_DURATION_MS while in madlib panel
+        if (madlibCycleTimer) clearInterval(madlibCycleTimer);
+        madlibCycleTimer = setInterval(function () {
+            if (currentPanel === 1) nextMadlib();
+        }, MADLIB_DURATION_MS);
+    }
+
+    function stopAttract() {
+        if (attractTimer) { clearTimeout(attractTimer); attractTimer = null; }
+        if (madlibCycleTimer) { clearInterval(madlibCycleTimer); madlibCycleTimer = null; }
+        document.getElementById('attract').classList.add('hidden');
+    }
+
+    // ── Game mode ──────────────────────────────────────────────────────────
+    var activeWorkflowId = null;
+
+    function showGameMode(workflowId, runId) {
+        stopAttract();
+        document.getElementById('game-mode').classList.remove('hidden');
+        document.getElementById('wf-id-label').textContent = workflowId;
+        var frame = document.getElementById('timeline-frame');
+        var url = TEMPORAL_UI + '/namespaces/default/workflows/' + encodeURIComponent(workflowId) + '/' + encodeURIComponent(runId) + '/timeline?theme=dark';
+        if (frame.src !== url) frame.src = url;
+        activeWorkflowId = workflowId;
+    }
+
+    // ── Polling ────────────────────────────────────────────────────────────
+    var isGameMode = false;
+
+    function poll() {
+        fetch('/api/active-game')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.workflow_id && data.run_id) {
+                    if (!isGameMode || data.workflow_id !== activeWorkflowId) {
+                        isGameMode = true;
+                        showGameMode(data.workflow_id, data.run_id);
+                    }
+                } else {
+                    if (isGameMode) {
+                        isGameMode = false;
+                        activeWorkflowId = null;
+                        startAttract();
+                    }
+                }
+            })
+            .catch(function () { /* silently ignore poll errors */ });
+    }
+
+    // ── Particles ──────────────────────────────────────────────────────────
+    var container = document.getElementById('particles');
+    for (var particleIndex = 0; particleIndex < 18; particleIndex++) {
+        var particle = document.createElement('div');
+        particle.className = 'particle';
+        var size = Math.random() * 4 + 2;
+        particle.style.width  = size + 'px';
+        particle.style.height = size + 'px';
+        particle.style.left   = Math.random() * 100 + 'vw';
+        particle.style.animationDuration = (Math.random() * 12 + 8) + 's';
+        particle.style.animationDelay    = (Math.random() * 10) + 's';
+        particle.style.opacity = String(Math.random() * 0.5 + 0.1);
+        container.appendChild(particle);
+    }
+
+    // ── Boot ───────────────────────────────────────────────────────────────
+    startAttract();
+    poll();
+    setInterval(poll, POLL_INTERVAL_MS);
+})();
+</script>
+</body>
+</html>
