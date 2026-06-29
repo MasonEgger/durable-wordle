@@ -80,6 +80,16 @@
         #madlib-area { transition: opacity 0.4s ease; }
 
         /* Leaderboard panel */
+        /* Clip the list to a circle-safe height; the inner list ping-pong
+           scrolls via a transform animation (distance set in JS per entry count). */
+        #leaderboard-panel #lb-viewport { width: 100%; max-height: 42vmin; overflow: hidden; }
+        #lb-list.lb-scrolling {
+            animation: lbScroll var(--lb-duration, 16s) ease-in-out infinite alternate;
+        }
+        @keyframes lbScroll {
+            0%, 10%   { transform: translateY(0); }
+            90%, 100% { transform: translateY(var(--lb-shift, 0px)); }
+        }
         #leaderboard-panel .lb-row { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 0; border-bottom: 1px solid #2a2a2c; width: 100%; max-width: 520px; }
         #leaderboard-panel .lb-rank { width: 2.5rem; text-align: center; font-weight: 700; font-size: 1.1rem; flex-shrink: 0; }
         #leaderboard-panel .lb-name { flex: 1; font-size: 1rem; font-weight: 700; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -134,8 +144,13 @@
             left: -10000px; top: 0; border: none; visibility: hidden;
             pointer-events: none;
         }
+        /* Cap width to the inscribed circle of the display. On a 1920x1080
+           screen shown as a circle, the diameter is 1080 (= 100vmin); a
+           centered timeline band has ~1030px of usable width, so 88vmin
+           (~950px) keeps the chart's ends from being clipped by the bezel. */
         #timeline-box {
             width: 100%;
+            max-width: 88vmin;
             padding: 0.5rem;
         }
         #timeline-box svg {
@@ -159,7 +174,7 @@
     <!-- Panel 0: Logo / idle -->
     <div class="attract-panel active" id="logo-panel">
         <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:2rem;">
-            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float" style="width:160px; height:160px; object-fit:contain;">
+            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float" style="width:240px; height:240px; object-fit:contain;">
             <img src="/static/temporal-logo-lockup-white.svg" alt="Temporal" style="height:3.2rem; width:auto;">
             <p class="font-mono text-sm tracking-widest font-bold" style="color:#cfff0d; text-transform:uppercase; letter-spacing:0.22em;">Durable Wordle</p>
         </div>
@@ -168,7 +183,7 @@
     <!-- Panel 1: Madlib cycling -->
     <div class="attract-panel" id="madlib-panel">
         <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:2rem;">
-            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float" style="width:120px; height:120px; object-fit:contain;">
+            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float" style="width:180px; height:180px; object-fit:contain;">
             <div id="madlib-area" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:0.5rem;">
                 <span class="phrase-text" style="font-family:'Space Mono',monospace;">What if your</span>
                 <span class="madlib-chip" id="madlib-noun">CODE</span>
@@ -184,8 +199,9 @@
         <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:1rem; width:100%; max-width:560px; padding:0 2rem;">
             <p class="font-mono text-xs tracking-widest" style="color:#64748b; text-transform:uppercase;">{{ game_date }} · Today's Leaderboard</p>
             {% if entries %}
-            <div style="width:100%;">
-                {% for entry in entries[:10] %}
+            <div id="lb-viewport" style="width:100%;">
+                <div id="lb-list">
+                {% for entry in entries %}
                 <div class="lb-row {% if loop.index <= 3 %}top{% endif %}">
                     <span class="lb-rank" style="{% if loop.index == 1 %}font-size:1.4rem;{% elif loop.index == 2 or loop.index == 3 %}font-size:1.2rem;{% else %}color:#64748b;{% endif %}">
                         {%- if loop.index == 1 %}🥇{%- elif loop.index == 2 %}🥈{%- elif loop.index == 3 %}🥉{%- else %}{{ loop.index }}.{%- endif -%}
@@ -195,6 +211,7 @@
                     <span class="lb-time">{{ entry.elapsed_formatted }}</span>
                 </div>
                 {% endfor %}
+                </div>
             </div>
             {% else %}
             <p class="font-mono text-sm" style="color:#64748b; text-align:center; padding:2rem 0;">No scores yet today. Be the first!</p>
@@ -228,7 +245,7 @@
     var POLL_INTERVAL_MS   = 2000;
     var LOGO_DURATION_MS   = 4000;
     var MADLIB_DURATION_MS = 6000;
-    var LB_DURATION_MS     = 8000;
+    var LB_DURATION_MS     = 18000;  // long enough to scroll the full board
     var FADE_MS            = 400;
 
     // ── Madlib data ────────────────────────────────────────────────────────
@@ -260,6 +277,30 @@
     var attractTimer = null;
     var madlibCycleTimer = null;
 
+    // Ping-pong auto-scroll for the leaderboard list (only if it overflows).
+    // Uses a CSS transform animation (compositor-driven, ~55 px/s) rather than
+    // requestAnimationFrame so it keeps running even if the kiosk tab is hidden.
+    var LB_SCROLL_SPEED = 55;  // px per second
+
+    function stopLeaderboardScroll() {
+        var list = document.getElementById('lb-list');
+        if (list) list.classList.remove('lb-scrolling');
+    }
+
+    function startLeaderboardScroll() {
+        var viewport = document.getElementById('lb-viewport');
+        var list = document.getElementById('lb-list');
+        if (!viewport || !list) return;
+        list.classList.remove('lb-scrolling');
+        var overflow = viewport.scrollHeight - viewport.clientHeight;
+        if (overflow <= 1) return;  // everything already fits — no scroll needed
+        list.style.setProperty('--lb-shift', '-' + overflow + 'px');
+        // Constant scroll speed regardless of how many entries there are.
+        list.style.setProperty('--lb-duration', Math.round(overflow / LB_SCROLL_SPEED) + 3 + 's');
+        void list.offsetWidth;  // force reflow so the animation restarts from the top
+        list.classList.add('lb-scrolling');
+    }
+
     function showPanel(index) {
         PANELS.forEach(function (id, panelIndex) {
             var el = document.getElementById(id);
@@ -270,6 +311,9 @@
             if (dot) dot.classList.toggle('active', dotIndex === index);
         }
         currentPanel = index;
+        // Auto-scroll only while the leaderboard panel is the active one.
+        if (index === 2) startLeaderboardScroll();
+        else stopLeaderboardScroll();
     }
 
     function advanceAttract() {
@@ -295,6 +339,7 @@
     function stopAttract() {
         if (attractTimer) { clearTimeout(attractTimer); attractTimer = null; }
         if (madlibCycleTimer) { clearInterval(madlibCycleTimer); madlibCycleTimer = null; }
+        stopLeaderboardScroll();
         document.getElementById('attract').classList.add('hidden');
     }
 

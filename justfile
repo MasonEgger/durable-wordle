@@ -24,7 +24,7 @@ dev:
     }
     trap cleanup EXIT INT TERM
 
-    temporal server start-dev &
+    temporal server start-dev --ui-port 8233 &
     temporal_pid=$!
 
     echo "Waiting for Temporal on localhost:7233..."
