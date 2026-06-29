@@ -285,3 +285,30 @@ class TestUserSessionWorkflow:
                 state = await handle.query(UserSessionWorkflow.get_game_state)
                 assert state.target_word in ANSWER_LIST
                 assert state.status == "playing"
+
+
+class TestInactivityTimeout:
+    """Tests for the inactivity timeout that abandons idle games."""
+
+    async def test_game_abandoned_after_inactivity(self) -> None:
+        """A game with no guesses should abandon once the timeout elapses."""
+        async with await WorkflowEnvironment.start_time_skipping() as env:
+            task_queue = f"timeout-{uuid.uuid4()}"
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                async with Worker(
+                    env.client,
+                    task_queue=task_queue,
+                    workflows=[UserSessionWorkflow],
+                    activities=[calculate_feedback, select_word, validate_guess],
+                    activity_executor=executor,
+                ):
+                    handle = await env.client.start_workflow(
+                        UserSessionWorkflow.run,
+                        WorkflowInput(session_id="idle-session"),
+                        id=str(uuid.uuid4()),
+                        task_queue=task_queue,
+                    )
+                    # Time-skipping fast-forwards through the 60s timer.
+                    final_state = await handle.result()
+                    assert final_state.status == "abandoned"
+                    assert len(final_state.guesses) == 0

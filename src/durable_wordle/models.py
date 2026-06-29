@@ -39,7 +39,8 @@ class GameState:
     :param target_word: The word the player is trying to guess (uppercase).
     :param guesses: List of guess results submitted so far.
     :param max_guesses: Maximum number of guesses allowed.
-    :param status: Current game status — ``"playing"``, ``"won"``, or ``"lost"``.
+    :param status: Current game status — ``"playing"``, ``"won"``, ``"lost"``,
+        or ``"abandoned"`` (closed after an inactivity timeout).
     """
 
     target_word: str
@@ -52,9 +53,9 @@ class GameState:
     def is_game_over(self) -> bool:
         """Check whether the game has ended.
 
-        :returns: ``True`` if the game status is ``"won"`` or ``"lost"``.
+        :returns: ``True`` if the game was won, lost, or abandoned.
         """
-        return self.status in ("won", "lost")
+        return self.status in ("won", "lost", "abandoned")
 
 
 @dataclass

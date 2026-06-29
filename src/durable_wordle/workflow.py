@@ -5,6 +5,10 @@ from datetime import timedelta
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 
+# Close the workflow if no guess is made within this window. Keeps abandoned
+# games from lingering as RUNNING workflows (which would pin the booth display).
+INACTIVITY_TIMEOUT = timedelta(seconds=60)
+
 with workflow.unsafe.imports_passed_through():
     from durable_wordle.activities import (
         calculate_feedback,
@@ -68,7 +72,29 @@ class UserSessionWorkflow:
             workflow_input.session_id,
         )
 
-        await workflow.wait_condition(lambda: self._state.is_game_over)
+        # Wait for the game to end, resetting an inactivity timer on each guess.
+        # If no guess arrives within INACTIVITY_TIMEOUT, abandon the game so the
+        # workflow completes instead of running forever.
+        while not self._state.is_game_over:
+            guesses_before = len(self._state.guesses)
+
+            def _activity_or_game_over(before: int = guesses_before) -> bool:
+                return (
+                    self._state.is_game_over
+                    or len(self._state.guesses) != before
+                )
+
+            try:
+                await workflow.wait_condition(
+                    _activity_or_game_over,
+                    timeout=INACTIVITY_TIMEOUT,
+                )
+            except TimeoutError:
+                self._state.status = "abandoned"
+                workflow.logger.info(
+                    "Game abandoned after %s of inactivity", INACTIVITY_TIMEOUT
+                )
+                break
 
         # Ensure all in-flight update handlers finish before completing
         await workflow.wait_condition(workflow.all_handlers_finished)

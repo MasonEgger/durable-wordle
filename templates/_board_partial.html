@@ -73,7 +73,7 @@
 {% endif %}
 
 <div id="action-area" class="flex items-center gap-3 justify-center mt-1">
-    {% if status in ["won", "lost"] %}
+    {% if status != "playing" %}
     <div id="endgame-actions" class="{% if animate %}hidden{% endif %} flex items-center gap-3">
         {% if status == "won" %}
         <button

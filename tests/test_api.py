@@ -386,3 +386,51 @@ class TestDesignSystemCompliance:
                 async with _make_client(workflow_environment, task_queue) as client:
                     response = await client.post("/guess", data={"guess": "QUICK"})
                     assert "bg-wordle-absent" in response.text
+
+
+class TestDisplayEndpoints:
+    """Tests for the /display page and /api/active-game endpoint."""
+
+    async def test_display_page_renders(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """GET /display should return 200 with attract-mode markup."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/display")
+            assert response.status_code == 200
+            body = response.text
+            assert "attract" in body
+            assert "game-mode" in body
+            assert "api/active-game" in body
+
+    async def test_active_game_returns_correct_shape(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """GET /api/active-game should return 200 with workflow_id and run_id keys."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/api/active-game")
+            assert response.status_code == 200
+            data = response.json()
+            assert "workflow_id" in data
+            assert "run_id" in data
+
+    async def test_active_game_returns_workflow_when_running(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """GET /api/active-game should return workflow ID when a game is running."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    await client.post("/play")
+                    response = await client.get("/api/active-game")
+                    assert response.status_code == 200
+                    data = response.json()
+                    assert data["workflow_id"] is not None
+                    assert data["run_id"] is not None
+                    assert data["workflow_id"].startswith("wordle-")

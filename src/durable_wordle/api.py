@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from temporalio.client import (
@@ -197,6 +198,33 @@ async def _get_or_start_workflow(
     )
 
 
+async def _terminate_other_running_games(
+    client: Client, keep_workflow_id: str
+) -> None:
+    """Terminate every running game workflow except the one to keep.
+
+    Abandoned games (closed before win/loss) leave their workflow running
+    forever. Since only one game is ever active at the booth, this enforces a
+    single running workflow so the display tracks the right game and stale
+    timelines do not pile up.
+
+    :param client: The Temporal client.
+    :param keep_workflow_id: Workflow ID of the current game to preserve.
+    """
+    query = 'WorkflowType="UserSessionWorkflow" AND ExecutionStatus="Running"'
+    try:
+        async for execution in client.list_workflows(query):
+            if execution.id == keep_workflow_id:
+                continue
+            try:
+                handle = client.get_workflow_handle(execution.id)
+                await handle.terminate("Superseded by a new game")
+            except RPCError:
+                pass
+    except Exception:
+        pass
+
+
 def _game_context(
     request: Request,
     game_state: GameState | None,
@@ -221,6 +249,8 @@ def _game_context(
     elif game_state and game_state.status == "lost":
         target = game_state.target_word
         status_message = status_message or f"✗ OUT OF MOVES! The word was {target} ✗"
+    elif game_state and game_state.status == "abandoned":
+        status_message = status_message or "⏱ SESSION TIMED OUT — start a new game"
 
     started_at_ts = (
         int(game_state.started_at.timestamp())
@@ -481,6 +511,10 @@ def create_app(
         handle = await _get_or_start_workflow(client, workflow_id, session_id, queue)
         game_state = await _wait_for_game_state(handle)
 
+        # Enforce a single running game: terminate any abandoned workflows so the
+        # display tracks only the current game.
+        await _terminate_other_running_games(client, workflow_id)
+
         response = _render_game_screen(
             templates,
             request,
@@ -649,29 +683,158 @@ def create_app(
 
     @app.get("/api/active-game")
     async def active_game(request: Request) -> dict[str, str | None]:
-        """Return the currently running game workflow ID and run ID, if any.
+        """Return the most recently started running game workflow, if any.
 
-        Lists today's running ``wordle-random-*`` workflows and returns the
-        most recently started one. Returns ``null`` values when no game is active.
+        Orders running ``UserSessionWorkflow`` executions by start time so the
+        display always tracks the newest game even if stale workflows linger.
+        Returns ``null`` values when no game is active.
 
         :param request: The incoming HTTP request.
         :returns: Dict with ``workflow_id`` and ``run_id``, or nulls if idle.
         """
         client: Client = request.app.state.temporal_client
-        today = datetime.datetime.now(_LA_TZ).strftime("%Y-%m-%d")
-        query = (
-            f'WorkflowType="UserSessionWorkflow" AND ExecutionStatus="Running"'
-            f' AND WorkflowId STARTS_WITH "wordle-{today}-"'
-        )
+        query = 'WorkflowType="UserSessionWorkflow" AND ExecutionStatus="Running"'
         try:
-            async for execution in client.list_workflows(query):
-                return {
-                    "workflow_id": execution.id,
-                    "run_id": execution.run_id,
-                }
+            running = [execution async for execution in client.list_workflows(query)]
         except Exception:
-            pass
-        return {"workflow_id": None, "run_id": None}
+            running = []
+        if not running:
+            return {"workflow_id": None, "run_id": None}
+        # Most recently started game wins (visibility ORDER BY is not supported
+        # by the time-skipping test server, so sort client-side).
+        newest = max(
+            running,
+            key=lambda execution: execution.start_time
+            or datetime.datetime.min.replace(tzinfo=datetime.UTC),
+        )
+        return {"workflow_id": newest.id, "run_id": newest.run_id}
+
+    async def _temporal_proxy(upstream_path: str, request: Request) -> Response:
+        """Forward a request to the Temporal dev server at localhost:8233.
+
+        Strips X-Frame-Options and CSP headers so responses can be embedded in
+        an iframe, and rewrites root-relative asset URLs in HTML responses so
+        they continue to route through the ``/temporal-ui/`` proxy prefix.
+
+        :param upstream_path: Path on the Temporal server (no leading slash).
+        :param request: The incoming HTTP request.
+        :returns: Proxied response with frame-busting headers removed.
+        """
+        import re
+
+        query = request.url.query
+        target_url = f"http://localhost:8233/{upstream_path}"
+        if query:
+            target_url = f"{target_url}?{query}"
+
+        # Generous timeout: the UI long-polls history with waitNewEvent=true,
+        # which the Temporal server holds open until an event or its own timeout.
+        timeout = httpx.Timeout(70.0, connect=5.0)
+        body = await request.body()
+        forward_headers = {
+            k: v
+            for k, v in request.headers.items()
+            if k.lower() not in ("host", "origin", "referer", "content-length")
+        }
+        forward_headers["accept-encoding"] = "identity"
+
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=timeout
+        ) as http_client:
+            try:
+                upstream = await http_client.request(
+                    request.method,
+                    target_url,
+                    headers=forward_headers,
+                    content=body or None,
+                )
+            except httpx.ConnectError:
+                return Response(
+                    content="Temporal UI not available",
+                    status_code=502,
+                    media_type="text/plain",
+                )
+            except httpx.TimeoutException:
+                # Long-poll exceeded our window — return empty so the UI retries
+                return Response(status_code=204)
+
+        skip_headers = {
+            "x-frame-options",
+            "content-security-policy",
+            "transfer-encoding",
+        }
+        headers = {
+            k: v
+            for k, v in upstream.headers.items()
+            if k.lower() not in skip_headers
+        }
+
+        content = upstream.content
+        if "text/html" in upstream.headers.get("content-type", ""):
+            text = content.decode("utf-8", errors="replace")
+            # Rewrite root-relative asset/link URLs to route through the proxy
+            text = text.replace('src="/', 'src="/temporal-ui/')
+            text = text.replace("src='/", "src='/temporal-ui/")
+            text = text.replace('href="/', 'href="/temporal-ui/')
+            text = text.replace("href='/", "href='/temporal-ui/")
+            # Rewrite dynamic ES-module imports in inline scripts
+            # (e.g. import("/_app/...")) which the above does not catch
+            text = text.replace('import("/', 'import("/temporal-ui/')
+            text = text.replace("import('/", "import('/temporal-ui/")
+            # Tell SvelteKit its base path so the client router strips the
+            # /temporal-ui prefix and matches its routes correctly
+            text = text.replace('base: ""', 'base: "/temporal-ui"')
+            text = text.replace("base: ''", 'base: "/temporal-ui"')
+            # Strip inline CSP meta tag (blocks script loading in iframe)
+            text = re.sub(
+                r'<meta[^>]+http-equiv=["\']content-security-policy["\'][^>]*>',
+                "",
+                text,
+                flags=re.IGNORECASE,
+            )
+            content = text.encode("utf-8")
+            headers["content-length"] = str(len(content))
+
+        return Response(
+            content=content,
+            status_code=upstream.status_code,
+            headers=headers,
+            media_type=upstream.headers.get("content-type"),
+        )
+
+    _PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+    @app.api_route(
+        "/temporal-ui/{path:path}",
+        methods=_PROXY_METHODS,
+        include_in_schema=False,
+    )
+    async def temporal_ui_proxy(path: str, request: Request) -> Response:
+        """Reverse-proxy the Temporal UI assets, pages, and base-prefixed API.
+
+        :param path: URL path under the Temporal UI prefix.
+        :param request: The incoming HTTP request.
+        :returns: Proxied response.
+        """
+        return await _temporal_proxy(path, request)
+
+    @app.api_route(
+        "/api/v1/{path:path}",
+        methods=_PROXY_METHODS,
+        include_in_schema=False,
+    )
+    async def temporal_api_proxy(path: str, request: Request) -> Response:
+        """Reverse-proxy the Temporal server API so the UI's fetch calls work.
+
+        The Temporal UI (SvelteKit) calls ``/api/v1/...`` using absolute paths.
+        When the UI is embedded via the ``/temporal-ui/`` proxy those calls hit
+        this app instead of ``localhost:8233``. This route forwards them.
+
+        :param path: URL path under ``/api/v1/``.
+        :param request: The incoming HTTP request.
+        :returns: Proxied response.
+        """
+        return await _temporal_proxy(f"api/v1/{path}", request)
 
     @app.get("/display", response_class=HTMLResponse)
     async def display(request: Request) -> HTMLResponse:
