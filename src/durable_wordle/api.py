@@ -26,7 +26,11 @@ from temporalio.client import (
 from temporalio.service import RPCError
 
 from durable_wordle.leaderboard import add_entry as lb_add_entry
-from durable_wordle.leaderboard import get_madlib_pairs, get_top_entries_for_date
+from durable_wordle.leaderboard import (
+    get_madlib_pairs,
+    get_recent_win,
+    get_top_entries_for_date,
+)
 from durable_wordle.models import (
     GameState,
     GuessResult,
@@ -805,6 +809,32 @@ def create_app(
                 for entry in entries
             ],
             "madlibs": get_madlib_pairs(entries),
+        }
+
+    @app.get("/api/last-win")
+    async def last_win(request: Request) -> dict[str, Any]:
+        """Return the most recent winning entry within the last few seconds.
+
+        The display polls this to fire a one-off win celebration. Returns
+        ``{"win": null}`` when there is no fresh win; otherwise the entry's
+        name, guess count, formatted time, day rank, and ``submitted_at``
+        (used client-side to dedupe so each win celebrates exactly once).
+
+        :param request: The incoming HTTP request.
+        :returns: Dict with a ``win`` object, or ``{"win": null}`` when idle.
+        """
+        result = get_recent_win(_today_la())
+        if result is None:
+            return {"win": None}
+        entry, rank = result
+        return {
+            "win": {
+                "player_name": entry.player_name,
+                "guesses": entry.guesses,
+                "elapsed_formatted": entry.elapsed_formatted,
+                "rank": rank,
+                "submitted_at": entry.submitted_at,
+            }
         }
 
     @app.get("/api/active-game")

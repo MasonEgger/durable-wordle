@@ -184,6 +184,61 @@
             font-size: 1.1rem; letter-spacing: 0.1em;
         }
 
+        /* ── Win celebration ─────────────────────────────────────
+           Brief full-screen takeover when a player wins, centered on the
+           fan's optical circle (honors the calibration shift vars). */
+        #celebration {
+            position: absolute; inset: 0; z-index: 50;
+            display: flex; align-items: center; justify-content: center;
+            transform: translate(var(--shift-x), var(--shift-y));
+            background: radial-gradient(circle at center,
+                rgba(10,10,10,0.86) 0%, rgba(10,10,10,0.97) 70%);
+        }
+        #celebration.hidden { display: none; }
+        #celebration-inner {
+            position: relative; z-index: 1;
+            display: flex; flex-direction: column; align-items: center;
+            gap: 1rem; text-align: center; max-width: var(--circle-w);
+            padding: 0 2rem;
+            animation: celebPop 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28) both;
+        }
+        @keyframes celebPop {
+            0%   { transform: scale(0.6); opacity: 0; }
+            100% { transform: scale(1);   opacity: 1; }
+        }
+        .celeb-emoji { font-size: 5rem; line-height: 1; animation: float 3s ease-in-out infinite; }
+        .celeb-name {
+            font-family: 'Space Mono', monospace; font-weight: 700;
+            font-size: 3rem; color: #cfff0d; letter-spacing: 0.06em;
+            text-transform: uppercase; line-height: 1.05;
+            text-shadow: 0 0 24px #cfff0d66;
+        }
+        .celeb-detail {
+            font-family: 'Space Mono', monospace; font-size: 1.4rem;
+            color: #f8fafc; letter-spacing: 0.04em;
+        }
+        .celeb-rank {
+            font-family: 'Space Mono', monospace; font-weight: 700;
+            font-size: 1.8rem; color: #cacbf9; letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+        /* Confetti burst — particles emanate from the celebration center */
+        #celebration-confetti { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+        .confetti {
+            position: absolute; left: 50%; top: 50%;
+            border-radius: 2px; opacity: 0;
+            animation: confettiBurst 2.2s ease-out forwards;
+        }
+        @keyframes confettiBurst {
+            0%   { transform: translate(-50%, -50%) scale(0.3) rotate(0deg); opacity: 0; }
+            12%  { opacity: 1; }
+            100% {
+                transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy)))
+                           scale(1) rotate(420deg);
+                opacity: 0;
+            }
+        }
+
         /* ── Calibration overlay ─────────────────────────────────
            Pre-flight to find the fan's visible circle before the real display.
            Crosshair + rings (shifted by the calibration vars) are aligned by
@@ -362,6 +417,17 @@
     </div>
 </div>
 
+<!-- ── WIN CELEBRATION ────────────────────────────────────────────────────── -->
+<div id="celebration" class="hidden">
+    <div id="celebration-confetti"></div>
+    <div id="celebration-inner">
+        <div class="celeb-emoji">🎉</div>
+        <div class="celeb-name" id="celeb-name">PLAYER</div>
+        <div class="celeb-detail" id="celeb-detail">solved it</div>
+        <div class="celeb-rank" id="celeb-rank">RANKED #1</div>
+    </div>
+</div>
+
 <script>
 (function () {
     // ── Config ─────────────────────────────────────────────────────────────
@@ -370,6 +436,8 @@
     var MADLIB_DURATION_MS = 6000;
     var LB_DURATION_MS     = 18000;  // long enough to scroll the full board
     var FADE_MS            = 400;
+    var WIN_POLL_MS        = 2000;   // check for a fresh win on this cadence
+    var WIN_CELEBRATION_MS = 6000;   // how long the celebration stays up
 
     // ── Madlib data ────────────────────────────────────────────────────────
     var madlibs = {{ madlibs_json | safe }};
@@ -641,6 +709,7 @@
 
     function showGameMode(workflowId, runId) {
         stopAttract();
+        hideCelebration();  // a new live game preempts any lingering celebration
         document.getElementById('game-mode').classList.remove('hidden');
         document.getElementById('timeline-box').replaceChildren(
             Object.assign(document.createElement('span'), {
@@ -663,6 +732,83 @@
         var frame = document.getElementById('timeline-frame');
         if (frame) frame.src = 'about:blank';
         document.getElementById('game-mode').classList.add('hidden');
+    }
+
+    // ── Win celebration ──────────────────────────────────────────────────────
+    var lastWinKey = null;      // submitted_at of the most recently seen win
+    var celebrating = false;
+    var celebrationTimer = null;
+
+    var CONFETTI_COLORS = ['#cfff0d', '#cacbf9', '#f8fafc'];
+
+    function confettiBurst() {
+        var field = document.getElementById('celebration-confetti');
+        if (!field) return;
+        field.replaceChildren();
+        for (var pieceIndex = 0; pieceIndex < 80; pieceIndex++) {
+            var piece = document.createElement('div');
+            piece.className = 'confetti';
+            var angle = Math.random() * Math.PI * 2;
+            var distance = 28 + Math.random() * 42;  // vmin from center
+            piece.style.setProperty('--dx', (Math.cos(angle) * distance) + 'vmin');
+            piece.style.setProperty('--dy', (Math.sin(angle) * distance) + 'vmin');
+            var size = 6 + Math.random() * 8;
+            piece.style.width = size + 'px';
+            piece.style.height = size + 'px';
+            piece.style.background = CONFETTI_COLORS[pieceIndex % CONFETTI_COLORS.length];
+            piece.style.animationDelay = (Math.random() * 0.3) + 's';
+            field.appendChild(piece);
+        }
+    }
+
+    function ordinalRank(rank) {
+        if (rank === 1) return '🥇 1ST PLACE';
+        if (rank === 2) return '🥈 2ND PLACE';
+        if (rank === 3) return '🥉 3RD PLACE';
+        return 'RANKED #' + rank;
+    }
+
+    function hideCelebration() {
+        if (celebrationTimer) { clearTimeout(celebrationTimer); celebrationTimer = null; }
+        celebrating = false;
+        document.getElementById('celebration').classList.add('hidden');
+    }
+
+    function celebrateWin(win) {
+        celebrating = true;
+        var name = (win.player_name || 'Someone').toUpperCase();
+        var guessWord = win.guesses === 1 ? 'guess' : 'guesses';
+        document.getElementById('celeb-name').textContent = name;
+        document.getElementById('celeb-detail').textContent =
+            'solved in ' + win.guesses + ' ' + guessWord + ' · ' + win.elapsed_formatted;
+        document.getElementById('celeb-rank').textContent = ordinalRank(win.rank);
+        document.getElementById('celebration').classList.remove('hidden');
+        confettiBurst();
+        if (celebrationTimer) clearTimeout(celebrationTimer);
+        celebrationTimer = setTimeout(hideCelebration, WIN_CELEBRATION_MS);
+    }
+
+    function pollLastWin() {
+        if (isGameMode) return;  // never interrupt a live game
+        fetch('/api/last-win')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!data.win) return;
+                var key = data.win.submitted_at;
+                if (key === lastWinKey) return;  // already seen — fire once
+                lastWinKey = key;
+                if (!celebrating && !isGameMode) celebrateWin(data.win);
+            })
+            .catch(function () { /* ignore transient fetch errors */ });
+    }
+
+    // Record the current win (if any) without celebrating, so a stale win that
+    // predates page load doesn't trigger a celebration on boot.
+    function primeLastWin() {
+        return fetch('/api/last-win')
+            .then(function (res) { return res.json(); })
+            .then(function (data) { if (data.win) lastWinKey = data.win.submitted_at; })
+            .catch(function () { /* ignore */ });
     }
 
     // ── Polling ────────────────────────────────────────────────────────────
@@ -757,6 +903,9 @@
         setInterval(poll, POLL_INTERVAL_MS);
         refreshLeaderboard();
         setInterval(refreshLeaderboard, LEADERBOARD_REFRESH_MS);
+        // Prime the last-win key so a pre-existing win doesn't celebrate on boot,
+        // then poll for fresh wins to fire the celebration once each.
+        primeLastWin().then(function () { setInterval(pollLastWin, WIN_POLL_MS); });
     }
 
     function saveAndLaunch() {

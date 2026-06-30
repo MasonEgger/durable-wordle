@@ -1,8 +1,10 @@
 # ABOUTME: Tests for the FastAPI API layer covering session management,
 # game board rendering, health check, and Temporal workflow integration.
 import concurrent.futures
+import pathlib
 import uuid
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -482,3 +484,60 @@ class TestDisplayEndpoints:
                     assert data["workflow_id"] is not None
                     assert data["run_id"] is not None
                     assert data["workflow_id"].startswith("wordle-")
+
+
+class TestLastWinEndpoint:
+    """Tests for the GET /api/last-win endpoint."""
+
+    async def test_last_win_returns_null_when_no_recent_win(
+        self,
+        workflow_environment: WorkflowEnvironment,
+        task_queue: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """GET /api/last-win should return {"win": null} with no fresh entries."""
+        from durable_wordle import leaderboard
+
+        monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
+        monkeypatch.setattr(leaderboard, "_schema_ready", False)
+
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/api/last-win")
+            assert response.status_code == 200
+            assert response.json() == {"win": None}
+
+    async def test_last_win_returns_recent_entry(
+        self,
+        workflow_environment: WorkflowEnvironment,
+        task_queue: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """GET /api/last-win should surface a freshly added winning entry."""
+        from durable_wordle import leaderboard
+        from durable_wordle.api import _today_la
+
+        monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
+        monkeypatch.setattr(leaderboard, "_schema_ready", False)
+
+        leaderboard.add_entry(
+            player_name="Ada Lovelace",
+            email="",
+            guesses=3,
+            started_at=None,
+            madlib_noun="CODE",
+            madlib_verb="RAN",
+            game_date=_today_la(),
+        )
+
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/api/last-win")
+            assert response.status_code == 200
+            win = response.json()["win"]
+            assert win is not None
+            assert win["player_name"] == "Ada Lovelace"
+            assert win["guesses"] == 3
+            assert win["rank"] >= 1
+            assert "elapsed_formatted" in win
+            assert "submitted_at" in win

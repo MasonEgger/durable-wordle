@@ -222,6 +222,55 @@ def get_entries_for_date(game_date: str) -> list[LeaderboardEntry]:
     return [LeaderboardEntry(**dict(row)) for row in rows]
 
 
+def get_recent_win(
+    game_date: str,
+    now: datetime | None = None,
+    within_seconds: int = 15,
+) -> tuple[LeaderboardEntry, int] | None:
+    """Return the most recently submitted entry and its rank, if it is recent.
+
+    Used by the display's win celebration: returns the newest submission for the
+    day only when it landed within ``within_seconds`` so the celebration fires
+    once per real win and not for stale or seed entries. Rank is the 1-based
+    position in the day's standings (fewest guesses, then fastest time).
+
+    :param game_date: ISO date string (YYYY-MM-DD).
+    :param now: Reference time for the recency window (defaults to ``now(UTC)``).
+    :param within_seconds: Maximum age of the submission to qualify as recent.
+    :returns: A ``(entry, rank)`` tuple for the most recent win, or ``None`` if
+        there is no qualifying submission.
+    """
+    _ensure_schema()
+    current = now or datetime.now(UTC)
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT player_name, email, guesses, elapsed_seconds,
+                   madlib_noun, madlib_verb, submitted_at, game_date
+            FROM   entries
+            WHERE  game_date = ?
+            ORDER  BY guesses ASC, elapsed_seconds ASC
+            """,
+            (game_date,),
+        ).fetchall()
+    if not rows:
+        return None
+
+    entries = [LeaderboardEntry(**dict(row)) for row in rows]
+    most_recent_index = max(
+        range(len(entries)), key=lambda index: entries[index].submitted_at
+    )
+    most_recent = entries[most_recent_index]
+
+    submitted = datetime.fromisoformat(most_recent.submitted_at)
+    if submitted.tzinfo is None:
+        submitted = submitted.replace(tzinfo=UTC)
+    if (current - submitted).total_seconds() > within_seconds:
+        return None
+
+    return most_recent, most_recent_index + 1
+
+
 def get_madlib_pairs(entries: list[LeaderboardEntry]) -> list[list[str]]:
     """Return unique [noun, verb] pairs from entries that have madlib data.
 
