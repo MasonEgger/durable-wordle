@@ -55,3 +55,20 @@ def test_display_page_loads(live_server: str, page: Page) -> None:
     page.goto(f"{live_server}/display")
     expect(page.locator("#particles")).to_be_attached()
     expect(page.locator("#attract")).to_be_attached()
+
+
+def test_proxy_rewrites_temporal_ui(live_server: str, page: Page) -> None:
+    """The /temporal-ui reverse-proxy applies the rewrites that let the Temporal
+    UI render inside the display's iframe.
+
+    This is the guard for the proxy's fragile HTML rewriting: a Temporal UI
+    upgrade that changes the markup would break these and this fails loudly.
+    """
+    response = page.request.get(f"{live_server}/temporal-ui/")
+    assert response.status == 200, f"proxy returned {response.status}"
+    body = response.text()
+    # Asset paths and the SvelteKit base must be rewritten under the prefix,
+    # and the inline CSP (which blocks iframe scripts) must be stripped.
+    assert "/temporal-ui/_app" in body, "asset paths were not rewritten"
+    assert 'base: "/temporal-ui"' in body, "SvelteKit base was not rewritten"
+    assert "content-security-policy" not in body.lower(), "inline CSP not stripped"

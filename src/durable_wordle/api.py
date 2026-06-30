@@ -890,15 +890,18 @@ def create_app(
                     headers=forward_headers,
                     content=body or None,
                 )
-            except httpx.ConnectError:
+            except httpx.TimeoutException:
+                # Long-poll exceeded our window — return empty so the UI retries
+                return Response(status_code=204)
+            except httpx.HTTPError:
+                # Upstream unreachable or dropped the connection mid-response
+                # (ConnectError, RemoteProtocolError, ...). Fail soft with 502
+                # so one flaky request doesn't 500 and break the embedded UI.
                 return Response(
                     content="Temporal UI not available",
                     status_code=502,
                     media_type="text/plain",
                 )
-            except httpx.TimeoutException:
-                # Long-poll exceeded our window — return empty so the UI retries
-                return Response(status_code=204)
 
         skip_headers = {
             "x-frame-options",
@@ -911,6 +914,12 @@ def create_app(
 
         content = upstream.content
         if "text/html" in upstream.headers.get("content-type", ""):
+            # NOTE: these string rewrites are pinned to the current Temporal Web
+            # UI build (a SvelteKit app, UI ~2.49). A Temporal upgrade can change
+            # the markup (asset paths, the `base: ""` hydration token, inline CSP)
+            # and silently break iframe embedding / timeline extraction. The
+            # e2e test `test_proxy_renders_timeline_during_game` is the guard:
+            # it fails loudly if the proxied timeline stops rendering.
             text = content.decode("utf-8", errors="replace")
             # Rewrite root-relative asset/link URLs to route through the proxy
             text = text.replace('src="/', 'src="/temporal-ui/')
