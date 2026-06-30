@@ -137,18 +137,33 @@ dev:
         sleep 1 || true
     done
 
+# The worker and web app auto-restart if they die (unattended booth); Temporal dying
+# still shuts the stack down (restarting it would lose in-memory workflow state).
 # Full booth mode: start the stack, then open the game + display in Chrome kiosks.
 booth:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    # Auto-restart caps: give up if a process dies more than MAX_RESTARTS times
+    # within RESTART_WINDOW seconds, and back off briefly between restarts.
+    MAX_RESTARTS=5
+    RESTART_WINDOW=60
+    RESTART_BACKOFF=2
 
     temporal_pid=""
     worker_pid=""
     ui_pid=""
     game_profile=""
     display_profile=""
+    shutting_down=0
+
+    worker_restart_count=0
+    worker_window_start=0
+    ui_restart_count=0
+    ui_window_start=0
 
     cleanup() {
+        shutting_down=1
         for pid in "$ui_pid" "$worker_pid" "$temporal_pid"; do
             if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
                 kill "$pid" 2>/dev/null || true
@@ -164,6 +179,39 @@ booth:
         done
     }
     trap cleanup EXIT INT TERM
+
+    start_worker() {
+        uv run python -m durable_wordle.worker &
+        worker_pid=$!
+    }
+
+    start_ui() {
+        uv run uvicorn --factory durable_wordle.api:create_production_app --reload &
+        ui_pid=$!
+    }
+
+    # allow_restart <name>: track a rolling restart window for the named process.
+    # Returns 0 if a restart is within budget, 1 if the cap was exceeded.
+    allow_restart() {
+        local name="$1"
+        local count_var="${name}_restart_count"
+        local window_var="${name}_window_start"
+        local now window_start count
+        now=$(date +%s)
+        window_start="${!window_var}"
+        count="${!count_var}"
+        if [ "$(( now - window_start ))" -gt "$RESTART_WINDOW" ]; then
+            eval "$window_var=$now"
+            eval "$count_var=1"
+            return 0
+        fi
+        count=$(( count + 1 ))
+        eval "$count_var=$count"
+        if [ "$count" -gt "$MAX_RESTARTS" ]; then
+            return 1
+        fi
+        return 0
+    }
 
     for port in 7233 8233 8000; do
         if lsof -ti :"$port" >/dev/null 2>&1; then
@@ -181,11 +229,8 @@ booth:
         sleep 1
     done
 
-    uv run python -m durable_wordle.worker &
-    worker_pid=$!
-
-    uv run uvicorn --factory durable_wordle.api:create_production_app --reload &
-    ui_pid=$!
+    start_worker
+    start_ui
 
     echo "Waiting for the web app on localhost:8000..."
     until curl -fs http://localhost:8000/health >/dev/null 2>&1; do
@@ -224,13 +269,41 @@ booth:
     echo "Note: both kiosks open on the active display; move each onto its fan."
     echo "Press Ctrl-C to stop the stack (closes the kiosks too)."
 
-    # Stay up while all three live; exit cleanly (trap cleans up) if any dies.
-    while kill -0 "$temporal_pid" 2>/dev/null \
-       && kill -0 "$worker_pid" 2>/dev/null \
-       && kill -0 "$ui_pid" 2>/dev/null; do
-        sleep 1
+    # Supervisor: keep the worker + web app alive; bail if Temporal dies.
+    while true; do
+        [ "$shutting_down" -eq 1 ] && exit 0
+
+        if ! kill -0 "$temporal_pid" 2>/dev/null; then
+            echo "Temporal dev server exited — shutting down the stack (restarting it would lose in-memory workflow state)." >&2
+            exit 1
+        fi
+
+        if ! kill -0 "$worker_pid" 2>/dev/null; then
+            if allow_restart worker; then
+                echo "[$(date '+%H:%M:%S')] Worker exited — restarting (${worker_restart_count} in last ${RESTART_WINDOW}s)..." >&2
+                sleep "$RESTART_BACKOFF" || true
+                [ "$shutting_down" -eq 1 ] && exit 0
+                start_worker
+            else
+                echo "Worker died more than ${MAX_RESTARTS} times in ${RESTART_WINDOW}s — giving up, shutting down the stack." >&2
+                exit 1
+            fi
+        fi
+
+        if ! kill -0 "$ui_pid" 2>/dev/null; then
+            if allow_restart ui; then
+                echo "[$(date '+%H:%M:%S')] Web app exited — restarting (${ui_restart_count} in last ${RESTART_WINDOW}s)..." >&2
+                sleep "$RESTART_BACKOFF" || true
+                [ "$shutting_down" -eq 1 ] && exit 0
+                start_ui
+            else
+                echo "Web app died more than ${MAX_RESTARTS} times in ${RESTART_WINDOW}s — giving up, shutting down the stack." >&2
+                exit 1
+            fi
+        fi
+
+        sleep 1 || true
     done
-    echo "A process exited — shutting down the stack." >&2
 
 ui:
     uv run uvicorn --factory durable_wordle.api:create_production_app --reload
