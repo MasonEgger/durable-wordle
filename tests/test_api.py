@@ -451,7 +451,7 @@ class TestDisplayEndpoints:
             body = response.text
             assert "attract" in body
             assert "game-mode" in body
-            assert "api/active-game" in body
+            assert "/static/display.js" in body  # external module is wired up
 
     async def test_active_game_returns_correct_shape(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
