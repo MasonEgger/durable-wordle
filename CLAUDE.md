@@ -19,7 +19,8 @@ Durable Wordle — a Wordle clone where each game session is a Temporal workflow
 ## Commands
 
 ```bash
-just check      # lint + typecheck + test (the gate)
+just check      # lint + typecheck + test (the gate; excludes e2e)
+just test-e2e   # full-stack browser smoke tests (Playwright; needs temporal + chromium)
 just test       # uv run pytest
 just lint       # uv run ruff check src/ tests/
 just typecheck  # uv run mypy src/

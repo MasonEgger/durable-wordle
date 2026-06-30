@@ -79,10 +79,7 @@ class UserSessionWorkflow:
             guesses_before = len(self._state.guesses)
 
             def _activity_or_game_over(before: int = guesses_before) -> bool:
-                return (
-                    self._state.is_game_over
-                    or len(self._state.guesses) != before
-                )
+                return self._state.is_game_over or len(self._state.guesses) != before
 
             try:
                 await workflow.wait_condition(

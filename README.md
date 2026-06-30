@@ -181,10 +181,21 @@ just server     # start Temporal local dev server
 just worker     # start Temporal worker
 just ui         # start FastAPI web server
 just test       # run tests
+just test-e2e   # full-stack browser smoke tests (Playwright)
 just lint       # ruff check
 just typecheck  # mypy strict
 just format     # ruff format
 ```
+
+The default gate excludes the browser **e2e** tests. To run them once:
+
+```bash
+uv sync
+uv run playwright install chromium   # one-time browser download
+just test-e2e                        # boots Temporal + worker + app, drives Chromium
+```
+
+They cover the booth-critical flows: keyboard-only start (Tab→PLAY→Enter), guess submission (regression guard for the HTMX 422 bug), and the display page. They need the `temporal` binary and skip automatically if it (or the required ports) is unavailable.
 
 Run a single test:
 ```bash

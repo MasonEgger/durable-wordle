@@ -311,6 +311,11 @@ ui:
 test:
     uv run pytest
 
+# Full-stack browser tests: boot the stack + headless Chromium. Needs the
+# temporal binary and `uv run playwright install chromium` once.
+test-e2e:
+    uv run pytest -m e2e tests/e2e
+
 lint:
     uv run ruff check src/ tests/
 

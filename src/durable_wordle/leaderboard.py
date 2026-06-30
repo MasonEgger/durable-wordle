@@ -1,12 +1,15 @@
 # ABOUTME: Leaderboard persistence backed by SQLite.
 # Entries are scoped by game_date for daily resets; all entries are retained for
 # prize outreach via get_entries_for_date with include_email=True.
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-DB_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "leaderboard.db"
+# Override with DURABLE_WORDLE_DB (used by tests to isolate from real data).
+_DEFAULT_DB = Path(__file__).resolve().parent.parent.parent / "data" / "leaderboard.db"
+DB_FILE = Path(os.environ.get("DURABLE_WORDLE_DB") or _DEFAULT_DB)
 TOP_N: int = 25
 
 _schema_ready = False
