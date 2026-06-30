@@ -35,6 +35,12 @@
         body {
             background: #121213;
         }
+        /* Visible focus ring for keyboard navigation (Tab through buttons/links). */
+        :focus-visible {
+            outline: 3px solid #cfff0d;
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
         .tile-reveal {
             animation: reveal 0.5s ease-in-out both;
         }
@@ -299,12 +305,34 @@
         if (target.dataset.action === 'enter') submitGuess();
         else if (target.dataset.action === 'backspace') removeLetter();
         else if (target.dataset.key) addLetter(target.dataset.key);
+        // Drop focus after a real pointer click so physical-keyboard letter
+        // entry keeps flowing (the global keydown handler bails on focused
+        // buttons). Keyboard-activated clicks (detail === 0) keep focus.
+        if (event.detail > 0) target.blur();
     });
 
     document.addEventListener('keydown', function(event) {
-        if (event.target.tagName === 'TEXTAREA') return;
-        if (event.target.tagName === 'INPUT') return;
+        var target = event.target;
+        var tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
         if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+        // Space activates a focused link (anchors only do this for Enter
+        // natively); used by the START OVER links.
+        if (tag === 'A' && (event.key === ' ' || event.key === 'Spacebar')) {
+            event.preventDefault();
+            target.click();
+            return;
+        }
+
+        // Let Enter/Space activate a focused button or link natively
+        // (PLAY, LEADERBOARD, POST TO LEADERBOARD, START OVER, on-screen keys)
+        // instead of hijacking it for the game keyboard.
+        if (tag === 'BUTTON' || tag === 'A' || tag === 'SELECT') return;
+
+        // Otherwise focus is on the page body — drive the game keyboard, but
+        // only while a guess can actually be made.
+        if (!document.getElementById('guess-form')) return;
         if (event.key === 'Enter') { event.preventDefault(); submitGuess(); }
         else if (event.key === 'Backspace') { event.preventDefault(); removeLetter(); }
         else if (/^[a-zA-Z]$/.test(event.key)) { event.preventDefault(); addLetter(event.key); }
