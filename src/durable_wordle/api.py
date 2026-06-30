@@ -27,6 +27,7 @@ from temporalio.service import RPCError
 
 from durable_wordle.leaderboard import add_entry as lb_add_entry
 from durable_wordle.leaderboard import (
+    format_elapsed,
     get_madlib_pairs,
     get_recent_win,
     get_top_entries_for_date,
@@ -52,21 +53,6 @@ def _today_la() -> str:
     :returns: ISO date string in America/Los_Angeles.
     """
     return datetime.datetime.now(_LA_TZ).strftime("%Y-%m-%d")
-
-
-def _format_elapsed(seconds: int) -> str:
-    """Format an elapsed duration as ``H:MM:SS``.
-
-    Matches :pyattr:`leaderboard.LeaderboardEntry.elapsed_formatted` so the
-    share card and leaderboard agree on how a time is displayed.
-
-    :param seconds: Elapsed time in whole seconds.
-    :returns: Human-readable elapsed time string.
-    """
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    secs = seconds % 60
-    return f"{hours}:{minutes:02d}:{secs:02d}"
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -777,7 +763,7 @@ def create_app(
             "tile_feedback_css": TILE_FEEDBACK_CSS,
             "player_name": request.cookies.get("player_name", ""),
             "guess_count": len(guesses),
-            "elapsed_formatted": _format_elapsed(elapsed_seconds),
+            "elapsed_formatted": format_elapsed(elapsed_seconds),
             "won": bool(game_state and game_state.status == "won"),
             "emoji_grid": emoji_grid,
         }

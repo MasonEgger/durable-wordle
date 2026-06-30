@@ -12,6 +12,18 @@ TOP_N: int = 25
 _schema_ready = False
 
 
+def format_elapsed(seconds: int) -> str:
+    """Format an elapsed duration as ``H:MM:SS``.
+
+    Single source of truth for elapsed-time display, used by both leaderboard
+    entries and the share card.
+
+    :param seconds: Elapsed time in whole seconds.
+    :returns: Human-readable elapsed time string.
+    """
+    return f"{seconds // 3600}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
+
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
@@ -70,10 +82,7 @@ class LeaderboardEntry:
 
         :returns: Human-readable elapsed time string.
         """
-        hours = self.elapsed_seconds // 3600
-        minutes = (self.elapsed_seconds % 3600) // 60
-        seconds = self.elapsed_seconds % 60
-        return f"{hours}:{minutes:02d}:{seconds:02d}"
+        return format_elapsed(self.elapsed_seconds)
 
 
 def add_entry(
@@ -240,23 +249,11 @@ def get_recent_win(
     :returns: A ``(entry, rank)`` tuple for the most recent win, or ``None`` if
         there is no qualifying submission.
     """
-    _ensure_schema()
     current = now or datetime.now(UTC)
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT player_name, email, guesses, elapsed_seconds,
-                   madlib_noun, madlib_verb, submitted_at, game_date
-            FROM   entries
-            WHERE  game_date = ?
-            ORDER  BY guesses ASC, elapsed_seconds ASC
-            """,
-            (game_date,),
-        ).fetchall()
-    if not rows:
+    entries = get_entries_for_date(game_date)  # already ranked (guesses, time)
+    if not entries:
         return None
 
-    entries = [LeaderboardEntry(**dict(row)) for row in rows]
     most_recent_index = max(
         range(len(entries)), key=lambda index: entries[index].submitted_at
     )
