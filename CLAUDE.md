@@ -11,7 +11,7 @@ Durable Wordle — a Wordle clone where each game session is a Temporal workflow
 ## Stack
 
 - **Backend**: Temporal Python SDK (`temporalio`), FastAPI, Jinja2
-- **Frontend**: HTMX, Tailwind CSS (CDN), Space Mono font
+- **Frontend**: HTMX, Tailwind CSS (prebuilt to `static/tailwind.css` via `just build-css`; committed for offline use), Space Mono font
 - **Package management**: uv
 - **Task runner**: just
 - **Deployment**: Docker Compose with Temporal dev server
@@ -21,6 +21,7 @@ Durable Wordle — a Wordle clone where each game session is a Temporal workflow
 ```bash
 just check      # lint + typecheck + test (the gate; excludes e2e)
 just test-e2e   # full-stack browser smoke tests (Playwright; needs temporal + chromium)
+just build-css  # rebuild static/tailwind.css after changing template/JS classes
 just test       # uv run pytest
 just lint       # uv run ruff check src/ tests/
 just typecheck  # uv run mypy src/

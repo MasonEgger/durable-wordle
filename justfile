@@ -7,6 +7,10 @@ worker:
 archive *date:
     uv run python scripts/archive_leaderboard.py {{ date }}
 
+# Rebuild the committed Tailwind stylesheet after changing templates/JS classes.
+build-css:
+    npx --yes tailwindcss@3 -c tailwind.config.js -i static/tailwind.input.css -o static/tailwind.css --minify
+
 server:
     temporal server start-dev
 

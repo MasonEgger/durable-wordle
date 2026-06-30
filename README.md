@@ -182,6 +182,7 @@ just worker     # start Temporal worker
 just ui         # start FastAPI web server
 just test       # run tests
 just test-e2e   # full-stack browser smoke tests (Playwright)
+just build-css  # rebuild static/tailwind.css from templates/JS (after class changes)
 just lint       # ruff check
 just typecheck  # mypy strict
 just format     # ruff format
@@ -220,7 +221,7 @@ docker compose down
 ## Tech Stack
 
 - **Backend:** Temporal Python SDK, FastAPI, Jinja2
-- **Frontend:** HTMX, Tailwind CSS (CDN), Space Mono
+- **Frontend:** HTMX, Tailwind CSS (prebuilt + committed, no CDN — works offline), Space Mono
 - **Persistence:** SQLite — leaderboard scores only; game state lives in the workflow
 - **Package management:** uv
 - **Task runner:** just
