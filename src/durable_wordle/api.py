@@ -4,7 +4,6 @@ import asyncio
 import datetime
 import json
 import os
-import re
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -12,9 +11,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from temporalio.client import (
@@ -39,6 +37,7 @@ from durable_wordle.models import (
     MakeGuessInput,
     WorkflowInput,
 )
+from durable_wordle.proxy import proxy_router
 from durable_wordle.workflow import UserSessionWorkflow
 
 _LA_TZ = ZoneInfo("America/Los_Angeles")
@@ -449,6 +448,7 @@ def create_app(
 
     app = FastAPI(title="Durable Wordle", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.include_router(proxy_router)  # /temporal-ui/* + /api/v1/* → Temporal UI
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
     @app.get("/health")
@@ -852,138 +852,6 @@ def create_app(
             ),
         )
         return {"workflow_id": newest.id, "run_id": newest.run_id}
-
-    async def _temporal_proxy(upstream_path: str, request: Request) -> Response:
-        """Forward a request to the Temporal dev server at localhost:8233.
-
-        Strips X-Frame-Options and CSP headers so responses can be embedded in
-        an iframe, and rewrites root-relative asset URLs in HTML responses so
-        they continue to route through the ``/temporal-ui/`` proxy prefix.
-
-        :param upstream_path: Path on the Temporal server (no leading slash).
-        :param request: The incoming HTTP request.
-        :returns: Proxied response with frame-busting headers removed.
-        """
-        query = request.url.query
-        target_url = f"http://localhost:8233/{upstream_path}"
-        if query:
-            target_url = f"{target_url}?{query}"
-
-        # Generous timeout: the UI long-polls history with waitNewEvent=true,
-        # which the Temporal server holds open until an event or its own timeout.
-        timeout = httpx.Timeout(70.0, connect=5.0)
-        body = await request.body()
-        forward_headers = {
-            k: v
-            for k, v in request.headers.items()
-            if k.lower() not in ("host", "origin", "referer", "content-length")
-        }
-        forward_headers["accept-encoding"] = "identity"
-
-        async with httpx.AsyncClient(
-            follow_redirects=True, timeout=timeout
-        ) as http_client:
-            try:
-                upstream = await http_client.request(
-                    request.method,
-                    target_url,
-                    headers=forward_headers,
-                    content=body or None,
-                )
-            except httpx.TimeoutException:
-                # Long-poll exceeded our window — return empty so the UI retries
-                return Response(status_code=204)
-            except httpx.HTTPError:
-                # Upstream unreachable or dropped the connection mid-response
-                # (ConnectError, RemoteProtocolError, ...). Fail soft with 502
-                # so one flaky request doesn't 500 and break the embedded UI.
-                return Response(
-                    content="Temporal UI not available",
-                    status_code=502,
-                    media_type="text/plain",
-                )
-
-        skip_headers = {
-            "x-frame-options",
-            "content-security-policy",
-            "transfer-encoding",
-        }
-        headers = {
-            k: v for k, v in upstream.headers.items() if k.lower() not in skip_headers
-        }
-
-        content = upstream.content
-        if "text/html" in upstream.headers.get("content-type", ""):
-            # NOTE: these string rewrites are pinned to the current Temporal Web
-            # UI build (a SvelteKit app, UI ~2.49). A Temporal upgrade can change
-            # the markup (asset paths, the `base: ""` hydration token, inline CSP)
-            # and silently break iframe embedding / timeline extraction. The
-            # e2e test `test_proxy_renders_timeline_during_game` is the guard:
-            # it fails loudly if the proxied timeline stops rendering.
-            text = content.decode("utf-8", errors="replace")
-            # Rewrite root-relative asset/link URLs to route through the proxy
-            text = text.replace('src="/', 'src="/temporal-ui/')
-            text = text.replace("src='/", "src='/temporal-ui/")
-            text = text.replace('href="/', 'href="/temporal-ui/')
-            text = text.replace("href='/", "href='/temporal-ui/")
-            # Rewrite dynamic ES-module imports in inline scripts
-            # (e.g. import("/_app/...")) which the above does not catch
-            text = text.replace('import("/', 'import("/temporal-ui/')
-            text = text.replace("import('/", "import('/temporal-ui/")
-            # Tell SvelteKit its base path so the client router strips the
-            # /temporal-ui prefix and matches its routes correctly
-            text = text.replace('base: ""', 'base: "/temporal-ui"')
-            text = text.replace("base: ''", 'base: "/temporal-ui"')
-            # Strip inline CSP meta tag (blocks script loading in iframe)
-            text = re.sub(
-                r'<meta[^>]+http-equiv=["\']content-security-policy["\'][^>]*>',
-                "",
-                text,
-                flags=re.IGNORECASE,
-            )
-            content = text.encode("utf-8")
-            headers["content-length"] = str(len(content))
-
-        return Response(
-            content=content,
-            status_code=upstream.status_code,
-            headers=headers,
-            media_type=upstream.headers.get("content-type"),
-        )
-
-    _PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-
-    @app.api_route(
-        "/temporal-ui/{path:path}",
-        methods=_PROXY_METHODS,
-        include_in_schema=False,
-    )
-    async def temporal_ui_proxy(path: str, request: Request) -> Response:
-        """Reverse-proxy the Temporal UI assets, pages, and base-prefixed API.
-
-        :param path: URL path under the Temporal UI prefix.
-        :param request: The incoming HTTP request.
-        :returns: Proxied response.
-        """
-        return await _temporal_proxy(path, request)
-
-    @app.api_route(
-        "/api/v1/{path:path}",
-        methods=_PROXY_METHODS,
-        include_in_schema=False,
-    )
-    async def temporal_api_proxy(path: str, request: Request) -> Response:
-        """Reverse-proxy the Temporal server API so the UI's fetch calls work.
-
-        The Temporal UI (SvelteKit) calls ``/api/v1/...`` using absolute paths.
-        When the UI is embedded via the ``/temporal-ui/`` proxy those calls hit
-        this app instead of ``localhost:8233``. This route forwards them.
-
-        :param path: URL path under ``/api/v1/``.
-        :param request: The incoming HTTP request.
-        :returns: Proxied response.
-        """
-        return await _temporal_proxy(f"api/v1/{path}", request)
 
     @app.get("/display", response_class=HTMLResponse)
     async def display(request: Request) -> HTMLResponse:
