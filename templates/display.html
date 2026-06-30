@@ -148,6 +148,20 @@
             50% { opacity: 0.7; box-shadow: 0 0 0 5px transparent; }
         }
 
+        /* Teaching caption — cycles Temporal concepts above the timeline (game mode
+           only). Sits inside the circle-safe column; min-height reserves space so
+           the timeline below it doesn't jump on each fade. */
+        #timeline-caption {
+            width: 100%; max-width: var(--circle-w);
+            min-height: 2.6em; padding: 0 1rem;
+            display: flex; align-items: center; justify-content: center;
+            text-align: center; line-height: 1.4;
+            font-family: 'Space Mono', monospace; font-size: 1.05rem;
+            letter-spacing: 0.04em; color: #cfff0d;
+            text-shadow: 0 0 12px #cfff0d44;
+            opacity: 0; transition: opacity 0.6s ease;
+        }
+
         /* Hidden source iframe — renders the real timeline so we can extract its SVG */
         #timeline-frame {
             position: absolute; width: 1400px; height: 900px;
@@ -338,6 +352,7 @@
 <!-- ── GAME MODE ──────────────────────────────────────────────────────────── -->
 <div id="game-mode" class="hidden">
     <iframe id="timeline-frame" src="about:blank"></iframe>
+    <div id="timeline-caption"></div>
     <div id="timeline-box">
         <span id="timeline-waiting">Loading timeline…</span>
     </div>
@@ -493,6 +508,54 @@
     var extractTimer = null;
     var SVG_EXTRACT_MS = 1500;  // re-clone the live timeline SVG on this cadence
 
+    // ── Teaching captions ────────────────────────────────────────────────────
+    // Rotating one-liners that explain the Temporal concepts the live timeline is
+    // showing. Game mode only — started in showGameMode, stopped in stopGameMode.
+    var TEACH_CAPTIONS = [
+        'select_word runs as a Temporal Activity',
+        'Activities are automatically retried on failure',
+        'Human-in-the-loop: the workflow waits for your guess',
+        'While waiting for input, the workflow uses no resources',
+        'Each guess is a durable update to the workflow',
+        'An update validates your guess before it runs',
+        'Queries read game state without changing it',
+        'The workflow IS the state — no database',
+        'Durable Execution: state survives worker restarts',
+        'Every step is recorded in the Event History'
+    ];
+    var CAPTION_INTERVAL_MS = 5000;
+    var captionTimer = null;
+    var captionIndex = 0;
+
+    function setCaption(index) {
+        var el = document.getElementById('timeline-caption');
+        if (!el) return;
+        el.style.opacity = '0';
+        setTimeout(function () {
+            el.textContent = TEACH_CAPTIONS[index];
+            el.style.opacity = '1';
+        }, FADE_MS);
+    }
+
+    function startCaptions() {
+        var el = document.getElementById('timeline-caption');
+        if (!el) return;
+        captionIndex = 0;
+        el.textContent = TEACH_CAPTIONS[0];
+        el.style.opacity = '1';
+        if (captionTimer) clearInterval(captionTimer);
+        captionTimer = setInterval(function () {
+            captionIndex = (captionIndex + 1) % TEACH_CAPTIONS.length;
+            setCaption(captionIndex);
+        }, CAPTION_INTERVAL_MS);
+    }
+
+    function stopCaptions() {
+        if (captionTimer) { clearInterval(captionTimer); captionTimer = null; }
+        var el = document.getElementById('timeline-caption');
+        if (el) el.style.opacity = '0';
+    }
+
     // SVG presentation properties to freeze inline when extracting, so the
     // timeline keeps its colors after leaving the Temporal stylesheet context.
     var SVG_STYLE_PROPS = [
@@ -591,10 +654,12 @@
         // Start the extraction loop (the Temporal UI auto-refreshes the source SVG)
         if (extractTimer) clearInterval(extractTimer);
         extractTimer = setInterval(extractTimeline, SVG_EXTRACT_MS);
+        startCaptions();
     }
 
     function stopGameMode() {
         if (extractTimer) { clearInterval(extractTimer); extractTimer = null; }
+        stopCaptions();
         var frame = document.getElementById('timeline-frame');
         if (frame) frame.src = 'about:blank';
         document.getElementById('game-mode').classList.add('hidden');
