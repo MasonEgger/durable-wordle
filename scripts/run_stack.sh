@@ -101,11 +101,19 @@ launch_kiosks() {
     game_profile="$(mktemp -d)"
     display_profile="$(mktemp -d)"
     # --kiosk --app: chromeless fullscreen. The rest suppress the
-    # first-run/restore-pages/crash bubbles after a hard kill.
-    local flags="--kiosk --no-first-run --no-default-browser-check --noerrdialogs --disable-session-crashed-bubble --disable-infobars --disable-features=Translate"
-    "$chrome_bin" $flags --user-data-dir="$game_profile" --app="http://localhost:8000" &
+    # first-run/restore-pages/crash bubbles after a hard kill, and silence
+    # Chrome's background chatter (GCM/push registration, sync, telemetry,
+    # component updates) that otherwise floods this terminal with
+    # PHONE_REGISTRATION_ERROR / GCM login errors — none of it is needed for a
+    # kiosk. --log-level=3 = fatal only; stderr is also sent to /dev/null.
+    local flags="--kiosk --no-first-run --no-default-browser-check --noerrdialogs"
+    flags="$flags --disable-session-crashed-bubble --disable-infobars"
+    flags="$flags --disable-features=Translate --disable-background-networking"
+    flags="$flags --disable-sync --disable-component-update --metrics-recording-only"
+    flags="$flags --log-level=3"
+    "$chrome_bin" $flags --user-data-dir="$game_profile" --app="http://localhost:8000" >/dev/null 2>&1 &
     sleep 2
-    "$chrome_bin" $flags --user-data-dir="$display_profile" --app="http://localhost:8000/display" &
+    "$chrome_bin" $flags --user-data-dir="$display_profile" --app="http://localhost:8000/display" >/dev/null 2>&1 &
 }
 
 # ── Pre-flight: required ports must be free ──────────────────────────────────
