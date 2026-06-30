@@ -336,6 +336,54 @@ class TestTemplateRendering:
                     assert "start over" in body.lower()
 
 
+class TestShareEndpoint:
+    """Tests for the GET /share result-card endpoint."""
+
+    async def test_share_renders_card_for_won_game(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """GET /share after a win returns the result card with grid and branding."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    play_response = await client.post(
+                        "/play", data={"first_name": "ADA", "email": "a@b.co"}
+                    )
+                    game_id = play_response.cookies["game_id"]
+                    handle = workflow_environment.client.get_workflow_handle(
+                        get_workflow_id(game_id)
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+                    await client.post("/guess", data={"guess": state.target_word})
+
+                    response = await client.get("/share")
+                    assert response.status_code == 200
+                    body = response.text
+                    assert "share-screen" in body
+                    # Player name from the /play cookie is shown.
+                    assert "ADA" in body
+                    # Won grid is all-correct → green squares.
+                    assert "bg-green-500" in body
+                    # Branding + QR to learn more about Temporal.
+                    assert "temporal-logo-lockup-white.svg" in body
+                    assert "temporal-qr.svg" in body
+
+    async def test_share_without_game_renders_empty_card(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """GET /share with no active game still returns the card scaffold."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/share")
+            assert response.status_code == 200
+            assert "share-screen" in response.text
+
+
 class TestDesignSystemCompliance:
     """Verify design tokens from the Figma file are reflected in rendered HTML.
 

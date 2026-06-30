@@ -1,0 +1,83 @@
+{# Shareable "I beat Durable Wordle!" result card — built for a phone photo. #}
+<div id="share-screen"
+     class="flex-1 flex flex-col items-center w-full max-w-lg px-4 py-4 gap-4 screen-enter">
+
+    {# The card — framed so it photographs cleanly full-screen. #}
+    <div class="w-full flex flex-col items-center gap-5 rounded-3xl border border-[#3a3a3c] bg-gradient-to-b from-[#1a1a2e] to-[#121213] px-6 py-7 shadow-2xl">
+
+        <p class="font-mono text-[0.65rem] tracking-[0.3em] text-temporal-indigo uppercase">
+            {{ "I beat" if won else "I played" }}
+        </p>
+        <h2 class="font-mono font-bold text-2xl sm:text-3xl text-temporal-grellow text-center leading-tight">
+            Durable Wordle
+        </h2>
+
+        {% if player_name %}
+        <p class="font-mono text-sm text-white text-center -mt-2">{{ player_name }}</p>
+        {% endif %}
+
+        {# Colored-square grid — the classic 🟩🟨⬛ recap. #}
+        <div class="flex flex-col gap-1.5" role="img"
+             aria-label="Guess grid:&#10;{{ emoji_grid }}">
+            {% for guess in guesses %}
+            <div class="flex gap-1.5 justify-center">
+                {% for fb in guess.feedback %}
+                <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-md {{ tile_feedback_css[fb.value] }}"></div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+
+        {# Stats — guesses + time. #}
+        <div class="flex items-stretch gap-3 w-full max-w-xs">
+            <div class="flex-1 flex flex-col items-center gap-0.5 rounded-xl border border-[#3a3a3c] py-3">
+                <span class="font-mono font-bold text-2xl text-temporal-grellow leading-none">{{ guess_count }}</span>
+                <span class="font-mono text-[0.6rem] tracking-widest text-slate-400 uppercase">
+                    guess{{ "es" if guess_count != 1 }}
+                </span>
+            </div>
+            <div class="flex-1 flex flex-col items-center gap-0.5 rounded-xl border border-[#3a3a3c] py-3">
+                <span class="font-mono font-bold text-2xl text-temporal-grellow leading-none">{{ elapsed_formatted }}</span>
+                <span class="font-mono text-[0.6rem] tracking-widest text-slate-400 uppercase">time</span>
+            </div>
+        </div>
+
+        <div class="w-full border-t border-[#3a3a3c]"></div>
+
+        {# Branding + QR to learn more about Temporal. #}
+        <div class="flex items-center justify-between w-full gap-4">
+            <div class="flex flex-col gap-2">
+                <img src="/static/temporal-logo-lockup-white.svg" alt="Temporal"
+                     class="h-7 w-auto object-contain self-start" draggable="false">
+                <p class="font-mono text-[0.6rem] tracking-widest text-temporal-indigo uppercase leading-relaxed">
+                    Durable execution<br>that never forgets
+                </p>
+            </div>
+            <div class="flex flex-col items-center gap-1 shrink-0">
+                <div class="w-24 h-24 bg-white rounded-xl p-2">
+                    <img src="/static/temporal-qr.svg" alt="Scan to learn more at temporal.io"
+                         class="w-full h-full" draggable="false">
+                </div>
+                <span class="font-mono text-[0.6rem] tracking-widest text-slate-400">temporal.io</span>
+            </div>
+        </div>
+    </div>
+
+    {# Footer actions — kept below the card so they stay out of the photo. #}
+    <div class="flex items-center gap-3 justify-center mt-1">
+        {% if won %}
+        <button
+            hx-post="/leaderboard"
+            hx-target="#screen"
+            hx-swap="innerHTML"
+            class="px-5 py-2.5 bg-temporal-uv hover:brightness-125 text-white font-bold rounded-full transition-all text-xs tracking-widest">
+            POST TO LEADERBOARD
+        </button>
+        {% endif %}
+        <a href="/new-game"
+           class="px-5 py-2.5 border border-[#3a3a3c] hover:border-slate-400 text-white font-bold rounded-full transition-all text-xs tracking-widest flex items-center gap-2">
+            START OVER <span aria-hidden="true">&#8635;</span>
+        </a>
+    </div>
+
+</div>

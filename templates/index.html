@@ -326,6 +326,9 @@
             } else if (document.getElementById('leaderboard-screen')) {
                 updateHeaderColor('leaderboard');
                 initMadlibCycle();
+            } else if (document.getElementById('share-screen')) {
+                stopCountdown();
+                updateHeaderColor('start');
             }
             return;
         }

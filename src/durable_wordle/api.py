@@ -49,6 +49,22 @@ def _today_la() -> str:
     """
     return datetime.datetime.now(_LA_TZ).strftime("%Y-%m-%d")
 
+
+def _format_elapsed(seconds: int) -> str:
+    """Format an elapsed duration as ``H:MM:SS``.
+
+    Matches :pyattr:`leaderboard.LeaderboardEntry.elapsed_formatted` so the
+    share card and leaderboard agree on how a time is displayed.
+
+    :param seconds: Elapsed time in whole seconds.
+    :returns: Human-readable elapsed time string.
+    """
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    return f"{hours}:{minutes:02d}:{secs:02d}"
+
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 STATIC_DIR = PROJECT_ROOT / "static"
@@ -65,6 +81,13 @@ TILE_FEEDBACK_CSS: dict[str, str] = {
     LetterFeedback.CORRECT.value: "bg-green-500 border-green-500",
     LetterFeedback.PRESENT.value: "bg-amber-500 border-amber-500",
     LetterFeedback.ABSENT.value: "bg-wordle-absent border-wordle-absent",
+}
+
+# Emoji squares for the shareable result card, keyed by LetterFeedback.value.
+SHARE_EMOJI: dict[str, str] = {
+    LetterFeedback.CORRECT.value: "🟩",
+    LetterFeedback.PRESENT.value: "🟨",
+    LetterFeedback.ABSENT.value: "⬛",
 }
 
 # Background CSS for keyboard keys, ordered highest→lowest priority.
@@ -210,9 +233,7 @@ async def _get_or_start_workflow(
     )
 
 
-async def _terminate_other_running_games(
-    client: Client, keep_workflow_id: str
-) -> None:
+async def _terminate_other_running_games(client: Client, keep_workflow_id: str) -> None:
     """Terminate every running game workflow except the one to keep.
 
     Abandoned games (closed before win/loss) leave their workflow running
@@ -714,6 +735,55 @@ def create_app(
             templates, request, session_id, is_new_session, game_state
         )
 
+    @app.get("/share", response_class=HTMLResponse)
+    async def share(request: Request) -> HTMLResponse:
+        """Render the shareable "I beat Durable Wordle!" result card.
+
+        Builds a colored-square grid of the player's guesses, their guess count
+        and elapsed time, name, Temporal branding, and a QR code linking to
+        ``temporal.io``. Rendered from the current game's workflow state plus the
+        player-name cookie, swapped into ``#screen`` like the other screens.
+
+        :param request: The incoming HTTP request.
+        :returns: Rendered share screen HTML fragment.
+        """
+        session_id, is_new_session, game_id = _session_from_request(request)
+        client: Client = app.state.temporal_client
+
+        game_state: GameState | None = None
+        if game_id:
+            game_state = await _query_existing_game(client, get_workflow_id(game_id))
+
+        guesses = game_state.guesses if game_state else []
+        elapsed_seconds = 0
+        if game_state and game_state.started_at:
+            started_at = game_state.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=datetime.UTC)
+            now = datetime.datetime.now(datetime.UTC)
+            elapsed_seconds = max(0, int((now - started_at).total_seconds()))
+
+        emoji_grid = "\n".join(
+            "".join(SHARE_EMOJI[fb.value] for fb in guess.feedback) for guess in guesses
+        )
+
+        context: dict[str, Any] = {
+            "request": request,
+            "guesses": guesses,
+            "tile_feedback_css": TILE_FEEDBACK_CSS,
+            "player_name": request.cookies.get("player_name", ""),
+            "guess_count": len(guesses),
+            "elapsed_formatted": _format_elapsed(elapsed_seconds),
+            "won": bool(game_state and game_state.status == "won"),
+            "emoji_grid": emoji_grid,
+        }
+        response = templates.TemplateResponse(
+            request=request, name="_share_screen.html", context=context
+        )
+        if is_new_session:
+            response.set_cookie(key="session_id", value=session_id, httponly=True)
+        return response
+
     @app.get("/api/leaderboard")
     async def api_leaderboard(request: Request) -> dict[str, Any]:
         """Return today's leaderboard as JSON for the live-updating display.
@@ -760,8 +830,10 @@ def create_app(
         # by the time-skipping test server, so sort client-side).
         newest = max(
             running,
-            key=lambda execution: execution.start_time
-            or datetime.datetime.min.replace(tzinfo=datetime.UTC),
+            key=lambda execution: (
+                execution.start_time
+                or datetime.datetime.min.replace(tzinfo=datetime.UTC)
+            ),
         )
         return {"workflow_id": newest.id, "run_id": newest.run_id}
 
@@ -818,9 +890,7 @@ def create_app(
             "transfer-encoding",
         }
         headers = {
-            k: v
-            for k, v in upstream.headers.items()
-            if k.lower() not in skip_headers
+            k: v for k, v in upstream.headers.items() if k.lower() not in skip_headers
         }
 
         content = upstream.content

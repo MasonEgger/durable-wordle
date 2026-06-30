@@ -83,6 +83,13 @@
             class="px-5 py-2.5 bg-temporal-uv hover:brightness-125 text-white font-bold rounded-full transition-all text-xs tracking-widest">
             POST TO LEADERBOARD
         </button>
+        <button
+            hx-get="/share"
+            hx-target="#screen"
+            hx-swap="innerHTML"
+            class="px-5 py-2.5 border border-temporal-grellow text-temporal-grellow hover:bg-temporal-grellow hover:text-temporal-black font-bold rounded-full transition-all text-xs tracking-widest">
+            SHARE / SELFIE
+        </button>
         {% endif %}
         <a href="/new-game"
            class="px-5 py-2.5 border border-[#3a3a3c] hover:border-slate-400 text-white font-bold rounded-full transition-all text-xs tracking-widest flex items-center gap-2">
