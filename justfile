@@ -3,6 +3,10 @@
 worker:
     uv run python -m durable_wordle.worker
 
+# Export a day's leaderboard (incl. emails) to data/archive/*.csv. Optional date arg.
+archive *date:
+    uv run python scripts/archive_leaderboard.py {{ date }}
+
 server:
     temporal server start-dev
 

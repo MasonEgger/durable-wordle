@@ -11,6 +11,7 @@ temporal.db
 # Leaderboard data (contains emails/PII)
 data/leaderboard.db
 data/leaderboard.json
+data/archive/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
