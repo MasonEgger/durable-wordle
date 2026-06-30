@@ -132,7 +132,7 @@ _SEED_PLAYER = "Shy Ruparel"
 _SEED_EMAIL = "test@test.com"  # placeholder — keep a real address out of the repo
 _SEED_NOUN = "CODE"
 _SEED_VERB = "FAILS"
-_SEED_ELAPSED = 599  # 9:59 — last-place floor entry
+_SEED_ELAPSED = 540  # 9:00 — last-place floor entry
 
 
 def _ensure_seed_entry(game_date: str) -> None:
