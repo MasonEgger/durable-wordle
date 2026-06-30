@@ -262,7 +262,8 @@ def _game_context(
         target = game_state.target_word
         status_message = status_message or f"✗ OUT OF MOVES! The word was {target} ✗"
     elif game_state and game_state.status == "abandoned":
-        status_message = status_message or "⏱ SESSION TIMED OUT — start a new game"
+        target = game_state.target_word
+        status_message = status_message or f"⏱ TIME'S UP! The word was {target}"
 
     started_at_ts = (
         int(game_state.started_at.timestamp())
@@ -691,6 +692,50 @@ def create_app(
         return templates.TemplateResponse(
             request=request, name="_start_screen.html", context={}
         )
+
+    @app.get("/board", response_class=HTMLResponse)
+    async def board(request: Request) -> HTMLResponse:
+        """Return the current game's board partial.
+
+        Used by the inactivity-countdown reveal: when the client timer expires,
+        it fetches the freshly-abandoned board (which now shows the target word).
+
+        :param request: The incoming HTTP request.
+        :returns: Board partial fragment, or 204 if there is no game.
+        """
+        session_id, is_new_session, game_id = _session_from_request(request)
+        client: Client = app.state.temporal_client
+        game_state = None
+        if game_id:
+            game_state = await _query_existing_game(client, get_workflow_id(game_id))
+        if game_state is None:
+            return HTMLResponse(content="", status_code=204)
+        return _render_board_partial(
+            templates, request, session_id, is_new_session, game_state
+        )
+
+    @app.get("/api/leaderboard")
+    async def api_leaderboard(request: Request) -> dict[str, Any]:
+        """Return today's leaderboard as JSON for the live-updating display.
+
+        :param request: The incoming HTTP request.
+        :returns: Dict with ``game_date``, ``entries`` (rank/name/guesses/time),
+            and deduplicated ``madlibs`` pairs.
+        """
+        today = _today_la()
+        entries = get_top_entries_for_date(today)
+        return {
+            "game_date": today,
+            "entries": [
+                {
+                    "player_name": entry.player_name,
+                    "guesses": entry.guesses,
+                    "elapsed_formatted": entry.elapsed_formatted,
+                }
+                for entry in entries
+            ],
+            "madlibs": get_madlib_pairs(entries),
+        }
 
     @app.get("/api/active-game")
     async def active_game(request: Request) -> dict[str, str | None]:

@@ -169,8 +169,56 @@
         }
     }
 
+    // ── Inactivity countdown (mirrors the workflow's 60s timeout) ────────────────
+    var INACTIVITY_SECONDS = 60;
+    var countdownInterval = null;
+    var countdownEnd = 0;
+
+    function countdownTick() {
+        var el = document.getElementById('countdown-value');
+        if (!el) { stopCountdown(); return; }
+        var remaining = Math.max(0, Math.round((countdownEnd - Date.now()) / 1000));
+        el.textContent = Math.floor(remaining / 60) + ':' + String(remaining % 60).padStart(2, '0');
+        el.classList.toggle('text-red-400', remaining <= 10);
+        el.classList.toggle('text-temporal-grellow', remaining > 10);
+        if (remaining <= 0) { stopCountdown(); revealOnTimeout(); }
+    }
+
+    function startCountdown() {
+        stopCountdown();
+        var area = document.getElementById('countdown-area');
+        if (!document.getElementById('guess-form')) {  // game over — hide it
+            if (area) area.style.display = 'none';
+            return;
+        }
+        if (area) area.style.display = '';
+        countdownEnd = Date.now() + INACTIVITY_SECONDS * 1000;
+        countdownTick();
+        countdownInterval = setInterval(countdownTick, 250);
+    }
+
+    function stopCountdown() {
+        if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    }
+
+    // On timeout the workflow abandons; fetch the revealed board (retry until the
+    // server has finished abandoning and the endgame actions appear).
+    function revealOnTimeout() {
+        var tries = 0;
+        (function attempt() {
+            tries++;
+            htmx.ajax('GET', '/board', { target: '#game-content', swap: 'innerHTML' })
+                .then(function () {
+                    if (!document.getElementById('endgame-actions') && tries < 6) {
+                        setTimeout(attempt, 1500);
+                    }
+                });
+        })();
+    }
+
     // Init timer on full-page load if game screen is present
     initTimerFromScreen();
+    startCountdown();
 
     // Init leaderboard on full-page load if leaderboard screen is present
     if (document.getElementById('leaderboard-screen')) {
@@ -272,6 +320,7 @@
             if (document.getElementById('game-screen')) {
                 updateHeaderColor('game');
                 initTimerFromScreen();
+                startCountdown();
             } else if (document.getElementById('start-screen')) {
                 updateHeaderColor('start');
             } else if (document.getElementById('leaderboard-screen')) {
@@ -283,6 +332,9 @@
 
         if (targetId === 'game-content') {
             currentGuess = '';
+            // A landed guess resets the inactivity window (or stops it if the
+            // game just ended — startCountdown no-ops when there's no guess form).
+            startCountdown();
 
             // Flip animation: apply color class at midpoint of each tile's flip
             document.querySelectorAll('.tile-reveal').forEach(function(tile) {

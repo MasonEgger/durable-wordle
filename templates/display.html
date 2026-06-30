@@ -419,9 +419,46 @@
             if (dot) dot.classList.toggle('active', dotIndex === index);
         }
         currentPanel = index;
-        // Auto-scroll only while the leaderboard panel is the active one.
-        if (index === 2) startLeaderboardScroll();
+        // Auto-scroll only while the leaderboard panel is the active one;
+        // pull fresh standings right before it's shown.
+        if (index === 2) { refreshLeaderboard(); startLeaderboardScroll(); }
         else stopLeaderboardScroll();
+    }
+
+    // ── Live leaderboard ─────────────────────────────────────────────────────
+    var LEADERBOARD_REFRESH_MS = 10000;
+
+    function escapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    function refreshLeaderboard() {
+        fetch('/api/leaderboard')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.madlibs && data.madlibs.length) madlibs = data.madlibs;
+                var list = document.getElementById('lb-list');
+                if (!list || !data.entries) return;
+                list.innerHTML = data.entries.map(function (entry, index) {
+                    var rank = index + 1;
+                    var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈'
+                        : rank === 3 ? '🥉' : (rank + '.');
+                    var rankStyle = rank === 1 ? 'font-size:1.4rem;'
+                        : (rank === 2 || rank === 3) ? 'font-size:1.2rem;'
+                        : 'color:#64748b;';
+                    var words = entry.guesses + ' word' + (entry.guesses === 1 ? '' : 's');
+                    return '<div class="lb-row' + (rank <= 3 ? ' top' : '') + '">'
+                        + '<span class="lb-rank" style="' + rankStyle + '">' + medal + '</span>'
+                        + '<span class="lb-name">' + escapeHtml(entry.player_name) + '</span>'
+                        + '<span class="lb-guesses">' + words + '</span>'
+                        + '<span class="lb-time">' + escapeHtml(entry.elapsed_formatted) + '</span>'
+                        + '</div>';
+                }).join('');
+                if (currentPanel === 2) startLeaderboardScroll();  // re-arm for new content
+            })
+            .catch(function () { /* ignore transient fetch errors */ });
     }
 
     function advanceAttract() {
@@ -589,16 +626,18 @@
 
     // ── Particles ──────────────────────────────────────────────────────────
     var container = document.getElementById('particles');
-    for (var particleIndex = 0; particleIndex < 18; particleIndex++) {
+    for (var particleIndex = 0; particleIndex < 60; particleIndex++) {
         var particle = document.createElement('div');
         particle.className = 'particle';
-        var size = Math.random() * 4 + 2;
+        var size = Math.random() * 5 + 1.5;
         particle.style.width  = size + 'px';
         particle.style.height = size + 'px';
         particle.style.left   = Math.random() * 100 + 'vw';
-        particle.style.animationDuration = (Math.random() * 12 + 8) + 's';
-        particle.style.animationDelay    = (Math.random() * 10) + 's';
+        particle.style.animationDuration = (Math.random() * 12 + 6) + 's';
+        particle.style.animationDelay    = (Math.random() * 12) + 's';
         particle.style.opacity = String(Math.random() * 0.5 + 0.1);
+        // Larger motes get a soft grellow glow for depth on the spinning fan.
+        if (size > 4) particle.style.boxShadow = '0 0 ' + (size * 2) + 'px #cfff0d';
         container.appendChild(particle);
     }
 
@@ -651,6 +690,8 @@
         startAttract();
         poll();
         setInterval(poll, POLL_INTERVAL_MS);
+        refreshLeaderboard();
+        setInterval(refreshLeaderboard, LEADERBOARD_REFRESH_MS);
     }
 
     function saveAndLaunch() {
