@@ -63,9 +63,12 @@ class WorkflowInput:
     """Input for starting a new Wordle game session workflow.
 
     :param session_id: Unique session identifier for this game.
+    :param inactivity_timeout_seconds: Optional inactivity timeout override,
+        used by tests and previews. ``None`` uses the production default.
     """
 
     session_id: str
+    inactivity_timeout_seconds: float | None = None
 
 
 @dataclass

@@ -1,59 +1,60 @@
-<div id="start-screen" class="flex-1 flex flex-col justify-start items-center w-full max-w-lg px-4 pt-4 pb-6 gap-6 screen-enter">
+<div id="start-screen" class="view screen-enter">
 
     <!-- Top: mascot + tagline + divider -->
-    <div class="flex flex-col items-center gap-4 w-full">
-        <img src="/static/mascot.svg" alt="Temporal mascot" class="w-36 h-36 object-contain" draggable="false">
+    <div class="view__intro">
+        <img src="/static/mascot.svg" alt="Temporal mascot" class="mascot mascot--start" draggable="false">
 
-        <p class="font-mono text-white text-center text-lg leading-relaxed max-w-sm">
+        <p class="tagline">
             Get 6 chances to guess a 5-letter word
         </p>
 
-        <div class="w-full border-t border-[#3a3a3c]"></div>
+        <div class="divider"></div>
     </div>
 
     <!-- Bottom: form inputs + side-by-side PLAY / LEADERBOARD buttons -->
-    <form class="w-full flex flex-col gap-4"
+    <form id="start-form"
+          class="form-stack"
           hx-post="/play"
           hx-target="#screen"
           hx-swap="innerHTML">
 
-        <div class="grid grid-cols-2 gap-3">
-            <div class="flex flex-col gap-1.5">
-                <label class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">First Name</label>
+        <div class="form-grid">
+            <div class="field">
+                <label class="field-label">First Name</label>
                 <input type="text" name="first_name" placeholder="MIN 3 CHARS" minlength="3" required
-                       class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
+                       class="text-input text-input--code">
             </div>
-            <div class="flex flex-col gap-1.5">
-                <label class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">Last Name</label>
+            <div class="field">
+                <label class="field-label">Last Name</label>
                 <input type="text" name="last_name" placeholder="MIN 3 CHARS" minlength="3"
-                       class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
+                       class="text-input text-input--code">
             </div>
         </div>
 
-        <div class="flex flex-col gap-1.5">
-            <label class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">Email <span class="text-slate-500 normal-case tracking-normal">(for prize notification)</span></label>
+        <div class="field">
+            <label class="field-label">Email <span class="field-note">(for prize notification)</span></label>
             <input type="email" name="email" placeholder="you@example.com" required
-                   class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] focus:outline-none focus:border-temporal-indigo transition-colors">
+                   class="text-input">
         </div>
 
-        <p class="font-mono text-xs tracking-widest text-temporal-indigo uppercase">
+        <p class="eyebrow">
             A Quick Mad Libs Before You Start...
         </p>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="form-grid">
             <input type="text" name="madlib_noun" placeholder="NOUN"
-                   class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
+                   class="text-input text-input--code">
             <input type="text" name="madlib_verb" placeholder="PAST TENSE VERB"
-                   class="w-full bg-[#1a1a2e] border border-[#3a3a5c] rounded-lg px-3 py-2.5 font-mono text-xs text-white placeholder-[#3a3a6c] tracking-widest uppercase focus:outline-none focus:border-temporal-indigo transition-colors">
+                   class="text-input text-input--code">
         </div>
 
-        <div class="flex gap-3 mt-1">
+        <div class="action-row">
             <button type="submit"
-                    class="flex-1 py-3 bg-temporal-uv hover:brightness-125 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase">
+                    class="btn btn--primary btn--full">
                 PLAY
             </button>
             <button type="button"
-                    class="flex-1 py-3 border border-[#3a3a3c] hover:border-slate-400 text-white font-mono font-bold rounded-full transition-all text-sm tracking-widest uppercase opacity-70"
+                    class="btn btn--secondary btn--full"
                     hx-get="/leaderboard-screen"
                     hx-target="#screen"
                     hx-swap="innerHTML">

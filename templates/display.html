@@ -8,285 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/tailwind.css">
-    <style>
-        * { box-sizing: border-box; }
-        html, body {
-            margin: 0; padding: 0;
-            background: #0a0a0a;
-            color: #f8fafc;
-            font-family: '"Space Mono"', monospace;
-            overflow: hidden;
-            width: 100vw; height: 100vh;
-            /* ── Holographic-fan calibration knobs (set via the calibrator
-                  overlay and persisted to localStorage) ──
-               --circle-w : max width of the timeline, sized to the fan's
-                            visible circle (NOT the full 1080 viewport).
-               --shift-x / --shift-y : nudge all content to re-center on the
-                            fan's optical center (negative = left / up). */
-            --circle-w: 68vmin;
-            --shift-x: 0px;
-            --shift-y: 0px;
-        }
-
-        /* ── Attract mode ────────────────────────────────────── */
-        #attract { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; transform: translate(var(--shift-x), var(--shift-y)); }
-        #attract.hidden { display: none; }
-
-        /* Segment panels — stacked, one visible at a time */
-        .attract-panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.5rem; opacity: 0; transition: opacity 0.6s ease; pointer-events: none; }
-        .attract-panel.active { opacity: 1; pointer-events: auto; }
-
-        /* Ziggy float animation */
-        @keyframes float {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-14px); }
-        }
-        .ziggy-float { animation: float 3s ease-in-out infinite; }
-
-        /* Particle field */
-        #particles { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
-        .particle {
-            position: absolute;
-            border-radius: 50%;
-            background: #cfff0d;
-            opacity: 0;
-            animation: drift linear infinite;
-        }
-        @keyframes drift {
-            0%   { transform: translateY(110vh) scale(0.5); opacity: 0; }
-            10%  { opacity: 0.6; }
-            90%  { opacity: 0.3; }
-            100% { transform: translateY(-10vh) scale(1.2); opacity: 0; }
-        }
-
-        /* Madlib panel */
-        .madlib-chip {
-            padding: 0.25rem 0.75rem;
-            border: 2px solid #cfff0d;
-            color: #cfff0d;
-            font-weight: 700;
-            border-radius: 4px;
-            letter-spacing: 0.12em;
-            font-size: 1.5rem;
-            transition: all 0.4s ease;
-        }
-        .phrase-text { color: #94a3b8; font-size: 1.4rem; }
-        #madlib-area { transition: opacity 0.4s ease; }
-
-        /* Leaderboard panel */
-        /* Clip the list to a circle-safe height; the inner list ping-pong
-           scrolls via a transform animation (distance set in JS per entry count). */
-        #leaderboard-panel #lb-viewport { width: 100%; max-height: 42vmin; overflow: hidden; }
-        #lb-list.lb-scrolling {
-            animation: lbScroll var(--lb-duration, 16s) ease-in-out infinite alternate;
-        }
-        @keyframes lbScroll {
-            0%, 10%   { transform: translateY(0); }
-            90%, 100% { transform: translateY(var(--lb-shift, 0px)); }
-        }
-        #leaderboard-panel .lb-row { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 0; border-bottom: 1px solid #2a2a2c; width: 100%; max-width: 520px; }
-        #leaderboard-panel .lb-rank { width: 2.5rem; text-align: center; font-weight: 700; font-size: 1.1rem; flex-shrink: 0; }
-        #leaderboard-panel .lb-name { flex: 1; font-size: 1rem; font-weight: 700; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        #leaderboard-panel .lb-guesses { font-size: 0.75rem; color: #64748b; flex-shrink: 0; width: 5rem; text-align: right; }
-        #leaderboard-panel .lb-time { font-size: 1rem; font-weight: 700; color: #cfff0d; flex-shrink: 0; width: 5rem; text-align: right; }
-        #leaderboard-panel .lb-row.top { padding: 0.8rem 0; }
-        #leaderboard-panel .lb-row.top .lb-name { font-size: 1.1rem; }
-
-        /* Logo pulse */
-        @keyframes logoPulse {
-            0%, 100% { opacity: 0.8; transform: scale(1); filter: drop-shadow(0 0 8px #cfff0d44); }
-            50% { opacity: 1; transform: scale(1.04); filter: drop-shadow(0 0 24px #cfff0d99); }
-        }
-        #logo-panel svg, #logo-panel img { animation: logoPulse 2.5s ease-in-out infinite; }
-
-        /* Dot progress indicator */
-        #attract-dots { display: flex; gap: 0.5rem; position: absolute; bottom: 2rem; }
-        .dot { width: 8px; height: 8px; border-radius: 50%; background: #3a3a3c; transition: background 0.3s; }
-        .dot.active { background: #cfff0d; }
-
-        /* ── Game mode ───────────────────────────────────────── */
-        /* Center the timeline + live badge as a compact cluster — no wasted
-           vertical space, sized to sit across the circle's middle. */
-        #game-mode {
-            position: absolute; inset: 0;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            gap: 1.25rem; padding: 0 3%;
-            transform: translate(var(--shift-x), var(--shift-y));
-        }
-        #game-mode.hidden { display: none; }
-
-        /* Live badge — sits just below the timeline */
-        #live-badge {
-            display: flex; align-items: center; gap: 0.6rem;
-            background: rgba(10,10,10,0.75); border: 1px solid #cfff0d33;
-            padding: 0.45rem 1.1rem; border-radius: 999px;
-            font-family: 'Space Mono', monospace; font-size: 0.85rem;
-            letter-spacing: 0.18em; color: #cfff0d; text-transform: uppercase;
-        }
-        #live-badge .live-dot {
-            width: 9px; height: 9px; border-radius: 50%; background: #cfff0d;
-            animation: pulse 1.2s ease-in-out infinite; flex-shrink: 0;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #cfff0d66; }
-            50% { opacity: 0.7; box-shadow: 0 0 0 5px transparent; }
-        }
-
-        /* Teaching caption — cycles Temporal concepts above the timeline (game mode
-           only). Sits inside the circle-safe column; min-height reserves space so
-           the timeline below it doesn't jump on each fade. */
-        #timeline-caption {
-            width: 100%; max-width: var(--circle-w);
-            min-height: 2.6em; padding: 0 1rem;
-            display: flex; align-items: center; justify-content: center;
-            text-align: center; line-height: 1.4;
-            font-family: 'Space Mono', monospace; font-size: 1.05rem;
-            letter-spacing: 0.04em; color: #cfff0d;
-            text-shadow: 0 0 12px #cfff0d44;
-            opacity: 0; transition: opacity 0.6s ease;
-        }
-
-        /* Hidden source iframe — renders the real timeline so we can extract its SVG */
-        #timeline-frame {
-            position: absolute; width: 1400px; height: 900px;
-            left: -10000px; top: 0; border: none; visibility: hidden;
-            pointer-events: none;
-        }
-        /* Cap width to the fan's visible circle (tuned via --circle-w), so the
-           chart's left-side event markers and right-side axis aren't clipped. */
-        #timeline-box {
-            width: 100%;
-            max-width: var(--circle-w);
-            padding: 0.5rem;
-        }
-        #timeline-box svg {
-            width: 100%; height: auto; display: block;
-            color: #f8fafc;  /* resolves any leftover currentColor strokes */
-        }
-        #timeline-waiting {
-            font-family: 'Space Mono', monospace; color: #64748b;
-            font-size: 1.1rem; letter-spacing: 0.1em;
-        }
-
-        /* ── Win celebration ─────────────────────────────────────
-           Brief full-screen takeover when a player wins, centered on the
-           fan's optical circle (honors the calibration shift vars). */
-        #celebration {
-            position: absolute; inset: 0; z-index: 50;
-            display: flex; align-items: center; justify-content: center;
-            transform: translate(var(--shift-x), var(--shift-y));
-            background: radial-gradient(circle at center,
-                rgba(10,10,10,0.86) 0%, rgba(10,10,10,0.97) 70%);
-        }
-        #celebration.hidden { display: none; }
-        #celebration-inner {
-            position: relative; z-index: 1;
-            display: flex; flex-direction: column; align-items: center;
-            gap: 1rem; text-align: center; max-width: var(--circle-w);
-            padding: 0 2rem;
-            animation: celebPop 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28) both;
-        }
-        @keyframes celebPop {
-            0%   { transform: scale(0.6); opacity: 0; }
-            100% { transform: scale(1);   opacity: 1; }
-        }
-        .celeb-emoji { font-size: 5rem; line-height: 1; animation: float 3s ease-in-out infinite; }
-        .celeb-name {
-            font-family: 'Space Mono', monospace; font-weight: 700;
-            font-size: 3rem; color: #cfff0d; letter-spacing: 0.06em;
-            text-transform: uppercase; line-height: 1.05;
-            text-shadow: 0 0 24px #cfff0d66;
-        }
-        .celeb-detail {
-            font-family: 'Space Mono', monospace; font-size: 1.4rem;
-            color: #f8fafc; letter-spacing: 0.04em;
-        }
-        .celeb-rank {
-            font-family: 'Space Mono', monospace; font-weight: 700;
-            font-size: 1.8rem; color: #cacbf9; letter-spacing: 0.12em;
-            text-transform: uppercase;
-        }
-        /* Confetti burst — particles emanate from the celebration center */
-        #celebration-confetti { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
-        .confetti {
-            position: absolute; left: 50%; top: 50%;
-            border-radius: 2px; opacity: 0;
-            animation: confettiBurst 2.2s ease-out forwards;
-        }
-        @keyframes confettiBurst {
-            0%   { transform: translate(-50%, -50%) scale(0.3) rotate(0deg); opacity: 0; }
-            12%  { opacity: 1; }
-            100% {
-                transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy)))
-                           scale(1) rotate(420deg);
-                opacity: 0;
-            }
-        }
-
-        /* ── Calibration overlay ─────────────────────────────────
-           Pre-flight to find the fan's visible circle before the real display.
-           Crosshair + rings (shifted by the calibration vars) are aligned by
-           eye to the fan's physical circle; the dashed box previews the
-           timeline width. */
-        #calibration { position: absolute; inset: 0; z-index: 100; background: #0a0a0a; }
-        #calibration.hidden { display: none; }
-        /* Shifted layer — rings/crosshair/box move with the live calibration */
-        #cal-target {
-            position: absolute; inset: 0;
-            display: flex; align-items: center; justify-content: center;
-            transform: translate(var(--shift-x), var(--shift-y));
-        }
-        .cal-ring {
-            position: absolute; left: 50%; top: 50%;
-            border: 1px solid #cfff0d33; border-radius: 50%;
-            transform: translate(-50%, -50%);
-        }
-        .cal-cross-h, .cal-cross-v { position: absolute; left: 50%; top: 50%; background: #cfff0d55; }
-        .cal-cross-h { width: 100vmax; height: 1px; transform: translate(-50%, -50%); }
-        .cal-cross-v { width: 1px; height: 100vmax; transform: translate(-50%, -50%); }
-        #cal-center-dot {
-            position: absolute; left: 50%; top: 50%; width: 14px; height: 14px;
-            background: #cfff0d; border-radius: 50%; transform: translate(-50%, -50%);
-            box-shadow: 0 0 16px #cfff0d;
-        }
-        /* Dashed preview of the timeline width */
-        #cal-width-box {
-            position: absolute; left: 50%; top: 50%;
-            width: var(--circle-w); height: 22vmin;
-            border: 2px dashed #cacbf9aa; border-radius: 10px;
-            transform: translate(-50%, -50%);
-        }
-        /* Control card — kept near center so it stays inside the visible circle */
-        #cal-panel {
-            position: absolute; left: 50%; top: 50%;
-            transform: translate(calc(-50% + var(--shift-x)), calc(-50% + var(--shift-y)));
-            display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
-            background: rgba(10,10,10,0.82); border: 1px solid #cfff0d44;
-            border-radius: 14px; padding: 1.1rem 1.4rem; width: 360px; max-width: 70vmin;
-            font-family: 'Space Mono', monospace; color: #f8fafc;
-        }
-        #cal-panel h2 { margin: 0; font-size: 0.8rem; letter-spacing: 0.25em; color: #cfff0d; text-transform: uppercase; }
-        #cal-readout { font-size: 0.85rem; color: #cacbf9; letter-spacing: 0.05em; }
-        #cal-hint { font-size: 0.62rem; color: #64748b; letter-spacing: 0.08em; text-align: center; line-height: 1.5; text-transform: uppercase; }
-        .cal-btn-grid { display: grid; grid-template-columns: repeat(3, 2.2rem); grid-auto-rows: 2.2rem; gap: 0.3rem; justify-content: center; align-items: center; }
-        .cal-btn {
-            display: flex; align-items: center; justify-content: center;
-            background: #1a1a2e; border: 1px solid #3a3a5c; border-radius: 8px;
-            color: #f8fafc; font-family: 'Space Mono', monospace; font-size: 0.9rem;
-            cursor: pointer; user-select: none;
-        }
-        .cal-btn:hover { border-color: #cfff0d; }
-        .cal-btn.empty { background: none; border: none; cursor: default; }
-        #cal-width-controls { display: flex; align-items: center; gap: 0.6rem; font-size: 0.7rem; color: #94a3b8; letter-spacing: 0.1em; }
-        #cal-save {
-            margin-top: 0.3rem; padding: 0.6rem 1.4rem; border-radius: 999px;
-            background: #cfff0d; color: #0a0a0a; border: none; font-weight: 700;
-            font-family: 'Space Mono', monospace; font-size: 0.8rem; letter-spacing: 0.15em;
-            text-transform: uppercase; cursor: pointer;
-        }
-        #cal-save:hover { filter: brightness(1.1); }
-    </style>
+    <link rel="stylesheet" href="/static/display.css">
 </head>
 <body>
 
@@ -295,77 +17,80 @@
 
 <!-- ── CALIBRATION OVERLAY (pre-flight: find the fan's circle) ───────────── -->
 <div id="calibration" class="hidden">
-    <div id="cal-target">
+    <div id="cal-target" class="display-shifted">
         <div class="cal-cross-h"></div>
         <div class="cal-cross-v"></div>
-        <div class="cal-ring" style="width:200px;height:200px;"></div>
-        <div class="cal-ring" style="width:400px;height:400px;"></div>
-        <div class="cal-ring" style="width:600px;height:600px;"></div>
-        <div class="cal-ring" style="width:800px;height:800px;"></div>
-        <div class="cal-ring" style="width:1000px;height:1000px;"></div>
-        <div id="cal-width-box"></div>
+        <div class="cal-ring cal-ring--sm"></div>
+        <div class="cal-ring cal-ring--md"></div>
+        <div class="cal-ring cal-ring--lg"></div>
+        <div class="cal-ring cal-ring--xl"></div>
+        <div class="cal-ring cal-ring--xxl"></div>
+        <div id="cal-full-circle"></div>
         <div id="cal-center-dot"></div>
     </div>
-    <div id="cal-panel">
-        <h2>Circle Calibration</h2>
-        <div id="cal-readout">x:0px · y:0px · w:68vmin</div>
-        <div class="cal-btn-grid">
-            <div class="cal-btn empty"></div>
-            <div class="cal-btn" data-nudge="up">&#8593;</div>
-            <div class="cal-btn empty"></div>
-            <div class="cal-btn" data-nudge="left">&#8592;</div>
-            <div class="cal-btn" data-nudge="center" style="font-size:0.55rem;">CTR</div>
-            <div class="cal-btn" data-nudge="right">&#8594;</div>
-            <div class="cal-btn empty"></div>
-            <div class="cal-btn" data-nudge="down">&#8595;</div>
-            <div class="cal-btn empty"></div>
+    <div id="cal-panel" aria-label="Circle calibration controls">
+        <div class="cal-status">
+            <h2>Circle Calibration</h2>
+            <div id="cal-readout">x:0px · y:0px · w:68vmin</div>
         </div>
-        <div id="cal-width-controls">
-            <span class="cal-btn" data-width="-1" style="width:1.8rem;height:1.8rem;">&#8722;</span>
-            WIDTH
-            <span class="cal-btn" data-width="1" style="width:1.8rem;height:1.8rem;">+</span>
+        <div class="cal-control-group" aria-label="Move circle">
+            <div class="cal-btn-grid">
+                <button class="cal-btn cal-btn--ghost" type="button" tabindex="-1" aria-hidden="true"></button>
+                <button class="cal-btn" type="button" data-nudge="up" aria-label="Move up">&#8593;</button>
+                <button class="cal-btn cal-btn--ghost" type="button" tabindex="-1" aria-hidden="true"></button>
+                <button class="cal-btn" type="button" data-nudge="left" aria-label="Move left">&#8592;</button>
+                <button class="cal-btn cal-btn--center" type="button" data-nudge="center" aria-label="Reset position">&#9678;</button>
+                <button class="cal-btn" type="button" data-nudge="right" aria-label="Move right">&#8594;</button>
+                <button class="cal-btn cal-btn--ghost" type="button" tabindex="-1" aria-hidden="true"></button>
+                <button class="cal-btn" type="button" data-nudge="down" aria-label="Move down">&#8595;</button>
+                <button class="cal-btn cal-btn--ghost" type="button" tabindex="-1" aria-hidden="true"></button>
+            </div>
         </div>
-        <button id="cal-save">Save &amp; Launch</button>
-        <div id="cal-hint">Arrow keys move · [ &nbsp;] resize · Enter saves<br>Align the rings to your fan's circle</div>
+        <div id="cal-width-controls" class="cal-control-group" aria-label="Resize circle">
+            <button class="cal-btn cal-btn--wide" type="button" data-width="-1" aria-label="Shrink circle">&#8722;</button>
+            <span class="cal-label">Size</span>
+            <button class="cal-btn cal-btn--wide" type="button" data-width="1" aria-label="Grow circle">+</button>
+        </div>
+        <button id="cal-save" type="button">Save &amp; Launch</button>
     </div>
 </div>
 
 <!-- ── ATTRACT MODE ─────────────────────────────────────────────────────── -->
-<div id="attract">
+<div id="attract" class="display-shifted">
 
     <!-- Panel 0: Logo / idle -->
     <div class="attract-panel active" id="logo-panel">
-        <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:2rem;">
-            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float" style="width:240px; height:240px; object-fit:contain;">
-            <img src="/static/temporal-logo-lockup-white.svg" alt="Temporal" style="height:3.2rem; width:auto;">
-            <p class="font-mono text-sm tracking-widest font-bold" style="color:#cfff0d; text-transform:uppercase; letter-spacing:0.22em;">Durable Wordle</p>
+        <div class="panel-stack">
+            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float ziggy-large">
+            <img src="/static/temporal-logo-lockup-white.svg" alt="Temporal" class="display-logo">
+            <p class="display-title">Durable Wordle</p>
         </div>
     </div>
 
     <!-- Panel 1: Madlib cycling -->
     <div class="attract-panel" id="madlib-panel">
-        <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:2rem;">
-            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float" style="width:180px; height:180px; object-fit:contain;">
-            <div id="madlib-area" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:0.5rem;">
-                <span class="phrase-text" style="font-family:'Space Mono',monospace;">What if your</span>
+        <div class="panel-stack">
+            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float ziggy-medium">
+            <div id="madlib-area" class="phrase-row">
+                <span class="phrase-text">What if your</span>
                 <span class="madlib-chip" id="madlib-noun">CODE</span>
-                <span class="phrase-text" style="font-family:'Space Mono',monospace;">never</span>
+                <span class="phrase-text">never</span>
                 <span class="madlib-chip" id="madlib-verb">FAILED</span>
-                <span class="phrase-text" style="font-family:'Space Mono',monospace;">?</span>
+                <span class="phrase-text">?</span>
             </div>
         </div>
     </div>
 
     <!-- Panel 2: Leaderboard -->
     <div class="attract-panel" id="leaderboard-panel">
-        <div style="z-index:1; display:flex; flex-direction:column; align-items:center; gap:1rem; width:100%; max-width:560px; padding:0 2rem;">
-            <p class="font-mono text-xs tracking-widest" style="color:#64748b; text-transform:uppercase;">{{ game_date }} · Today's Leaderboard</p>
+        <div class="panel-stack panel-stack--leaderboard">
+            <p class="display-eyebrow">{{ game_date }} · Today's Leaderboard</p>
             {% if entries %}
-            <div id="lb-viewport" style="width:100%;">
+            <div id="lb-viewport">
                 <div id="lb-list">
                 {% for entry in entries %}
                 <div class="lb-row {% if loop.index <= 3 %}top{% endif %}">
-                    <span class="lb-rank" style="{% if loop.index == 1 %}font-size:1.4rem;{% elif loop.index == 2 or loop.index == 3 %}font-size:1.2rem;{% else %}color:#64748b;{% endif %}">
+                    <span class="lb-rank {% if loop.index == 1 %}lb-rank--first{% elif loop.index == 2 or loop.index == 3 %}lb-rank--podium{% else %}lb-rank--standard{% endif %}">
                         {%- if loop.index == 1 %}🥇{%- elif loop.index == 2 %}🥈{%- elif loop.index == 3 %}🥉{%- else %}{{ loop.index }}.{%- endif -%}
                     </span>
                     <span class="lb-name">{{ entry.player_name }}</span>
@@ -376,7 +101,7 @@
                 </div>
             </div>
             {% else %}
-            <p class="font-mono text-sm" style="color:#64748b; text-align:center; padding:2rem 0;">No scores yet today. Be the first!</p>
+            <p class="display-empty">No scores yet today. Be the first!</p>
             {% endif %}
         </div>
     </div>
@@ -390,7 +115,7 @@
 </div>
 
 <!-- ── GAME MODE ──────────────────────────────────────────────────────────── -->
-<div id="game-mode" class="hidden">
+<div id="game-mode" class="hidden display-shifted">
     <iframe id="timeline-frame" src="about:blank"></iframe>
     <div id="timeline-caption"></div>
     <div id="timeline-box">
@@ -403,13 +128,23 @@
 </div>
 
 <!-- ── WIN CELEBRATION ────────────────────────────────────────────────────── -->
-<div id="celebration" class="hidden">
+<div id="celebration" class="hidden display-shifted">
     <div id="celebration-confetti"></div>
     <div id="celebration-inner">
         <div class="celeb-emoji">🎉</div>
         <div class="celeb-name" id="celeb-name">PLAYER</div>
         <div class="celeb-detail" id="celeb-detail">solved it</div>
         <div class="celeb-rank" id="celeb-rank">RANKED #1</div>
+    </div>
+</div>
+
+<!-- ── LOSS REVEAL ───────────────────────────────────────────────────────── -->
+<div id="loss-reveal" class="hidden display-shifted">
+    <div id="loss-inner">
+        <div class="loss-eyebrow">Out of moves</div>
+        <div class="loss-copy">The word was</div>
+        <div id="loss-word" class="loss-word" aria-live="polite"></div>
+        <div id="loss-detail" class="loss-detail"></div>
     </div>
 </div>
 

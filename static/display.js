@@ -1,12 +1,12 @@
 (function () {
     // ── Config ─────────────────────────────────────────────────────────────
-    var POLL_INTERVAL_MS   = 2000;
+    var DISPLAY_REFRESH_MS = 5000;
     var LOGO_DURATION_MS   = 4000;
     var MADLIB_DURATION_MS = 6000;
     var LB_DURATION_MS     = 18000;  // long enough to scroll the full board
     var FADE_MS            = 400;
-    var WIN_POLL_MS        = 2000;   // check for a fresh win on this cadence
     var WIN_CELEBRATION_MS = 6000;   // how long the celebration stays up
+    var LOSS_REVEAL_MS     = 8000;   // how long the answer stays up after a loss
 
     // ── Madlib data ────────────────────────────────────────────────────────
     var madlibs = (window.__DISPLAY__ && window.__DISPLAY__.madlibs) || [];
@@ -37,10 +37,11 @@
     var attractTimer = null;
     var madlibCycleTimer = null;
 
-    // Ping-pong auto-scroll for the leaderboard list (only if it overflows).
-    // Uses a CSS transform animation (compositor-driven, ~55 px/s) rather than
-    // requestAnimationFrame so it keeps running even if the kiosk tab is hidden.
-    var LB_SCROLL_SPEED = 55;  // px per second
+    // One-shot auto-scroll for the leaderboard list (only if it overflows).
+    // It must reach the bottom before the attract mode advances off this panel.
+    var LB_SCROLL_SPEED = 140;  // px per second when natural timing fits
+    var LB_SCROLL_MIN_SECONDS = 7;
+    var LB_SCROLL_END_PADDING_SECONDS = 1;
 
     function stopLeaderboardScroll() {
         var list = document.getElementById('lb-list');
@@ -55,8 +56,16 @@
         var overflow = viewport.scrollHeight - viewport.clientHeight;
         if (overflow <= 1) return;  // everything already fits — no scroll needed
         list.style.setProperty('--lb-shift', '-' + overflow + 'px');
-        // Constant scroll speed regardless of how many entries there are.
-        list.style.setProperty('--lb-duration', Math.round(overflow / LB_SCROLL_SPEED) + 3 + 's');
+        var panelSeconds = Math.max(
+            LB_SCROLL_MIN_SECONDS,
+            (LB_DURATION_MS / 1000) - LB_SCROLL_END_PADDING_SECONDS
+        );
+        var naturalSeconds = Math.round(overflow / LB_SCROLL_SPEED) + 2;
+        var durationSeconds = Math.min(
+            panelSeconds,
+            Math.max(LB_SCROLL_MIN_SECONDS, naturalSeconds)
+        );
+        list.style.setProperty('--lb-duration', durationSeconds + 's');
         void list.offsetWidth;  // force reflow so the animation restarts from the top
         list.classList.add('lb-scrolling');
     }
@@ -71,46 +80,39 @@
             if (dot) dot.classList.toggle('active', dotIndex === index);
         }
         currentPanel = index;
-        // Auto-scroll only while the leaderboard panel is the active one;
-        // pull fresh standings right before it's shown.
-        if (index === 2) { refreshLeaderboard(); startLeaderboardScroll(); }
+        // Auto-scroll only while the leaderboard panel is the active one.
+        if (index === 2) startLeaderboardScroll();
         else stopLeaderboardScroll();
     }
 
     // ── Live leaderboard ─────────────────────────────────────────────────────
-    var LEADERBOARD_REFRESH_MS = 10000;
-
     function escapeHtml(value) {
         var div = document.createElement('div');
         div.textContent = value == null ? '' : String(value);
         return div.innerHTML;
     }
 
-    function refreshLeaderboard() {
-        fetch('/api/leaderboard')
-            .then(function (res) { return res.json(); })
-            .then(function (data) {
-                if (data.madlibs && data.madlibs.length) madlibs = data.madlibs;
-                var list = document.getElementById('lb-list');
-                if (!list || !data.entries) return;
-                list.innerHTML = data.entries.map(function (entry, index) {
-                    var rank = index + 1;
-                    var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈'
-                        : rank === 3 ? '🥉' : (rank + '.');
-                    var rankStyle = rank === 1 ? 'font-size:1.4rem;'
-                        : (rank === 2 || rank === 3) ? 'font-size:1.2rem;'
-                        : 'color:#64748b;';
-                    var words = entry.guesses + ' word' + (entry.guesses === 1 ? '' : 's');
-                    return '<div class="lb-row' + (rank <= 3 ? ' top' : '') + '">'
-                        + '<span class="lb-rank" style="' + rankStyle + '">' + medal + '</span>'
-                        + '<span class="lb-name">' + escapeHtml(entry.player_name) + '</span>'
-                        + '<span class="lb-guesses">' + words + '</span>'
-                        + '<span class="lb-time">' + escapeHtml(entry.elapsed_formatted) + '</span>'
-                        + '</div>';
-                }).join('');
-                if (currentPanel === 2) startLeaderboardScroll();  // re-arm for new content
-            })
-            .catch(function () { /* ignore transient fetch errors */ });
+    function applyLeaderboard(data) {
+        if (!data) return;
+        if (data.madlibs && data.madlibs.length) madlibs = data.madlibs;
+        var list = document.getElementById('lb-list');
+        if (!list || !data.entries) return;
+        list.innerHTML = data.entries.map(function (entry, index) {
+            var rank = index + 1;
+            var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈'
+                : rank === 3 ? '🥉' : (rank + '.');
+            var rankClass = rank === 1 ? ' lb-rank--first'
+                : (rank === 2 || rank === 3) ? ' lb-rank--podium'
+                : ' lb-rank--standard';
+            var words = entry.guesses + ' word' + (entry.guesses === 1 ? '' : 's');
+            return '<div class="lb-row' + (rank <= 3 ? ' top' : '') + '">'
+                + '<span class="lb-rank' + rankClass + '">' + medal + '</span>'
+                + '<span class="lb-name">' + escapeHtml(entry.player_name) + '</span>'
+                + '<span class="lb-guesses">' + words + '</span>'
+                + '<span class="lb-time">' + escapeHtml(entry.elapsed_formatted) + '</span>'
+                + '</div>';
+        }).join('');
+        if (currentPanel === 2) startLeaderboardScroll();  // re-arm for new content
     }
 
     function advanceAttract() {
@@ -144,6 +146,8 @@
     var activeWorkflowId = null;
     var extractTimer = null;
     var SVG_EXTRACT_MS = 1500;  // re-clone the live timeline SVG on this cadence
+    var TIMELINE_CACHE_KEY = 'durable-wordle:first-timeline-svg';
+    var firstTimelineSvgMarkup = null;
 
     // ── Teaching captions ────────────────────────────────────────────────────
     // Rotating one-liners that explain the Temporal concepts the live timeline is
@@ -233,6 +237,41 @@
         return bestArea > 40000 ? best : null;
     }
 
+    function readCachedTimelineSvgMarkup() {
+        if (firstTimelineSvgMarkup) return firstTimelineSvgMarkup;
+        try {
+            firstTimelineSvgMarkup = window.sessionStorage.getItem(TIMELINE_CACHE_KEY);
+        } catch (err) {
+            firstTimelineSvgMarkup = null;
+        }
+        return firstTimelineSvgMarkup;
+    }
+
+    function cacheFirstTimelineSvg(svg) {
+        if (firstTimelineSvgMarkup) return;
+        firstTimelineSvgMarkup = svg.outerHTML;
+        try {
+            window.sessionStorage.setItem(TIMELINE_CACHE_KEY, firstTimelineSvgMarkup);
+        } catch (err) {
+            // Session storage is a nice-to-have; the in-memory copy still helps.
+        }
+    }
+
+    function buildTimelinePlaceholder() {
+        var cachedMarkup = readCachedTimelineSvgMarkup();
+        if (cachedMarkup) {
+            var template = document.createElement('template');
+            template.innerHTML = cachedMarkup.trim();
+            var cachedSvg = template.content.firstElementChild;
+            if (cachedSvg && cachedSvg.tagName.toLowerCase() === 'svg') {
+                return cachedSvg;
+            }
+        }
+        return Object.assign(document.createElement('span'), {
+            id: 'timeline-waiting', textContent: 'Loading timeline…'
+        });
+    }
+
     function extractTimeline() {
         var frame = document.getElementById('timeline-frame');
         var box = document.getElementById('timeline-box');
@@ -248,6 +287,7 @@
         clone.removeAttribute('class');
         clone.style.width = '100%';
         clone.style.height = 'auto';
+        cacheFirstTimelineSvg(clone);
         box.replaceChildren(clone);
     }
 
@@ -279,12 +319,9 @@
     function showGameMode(workflowId, runId) {
         stopAttract();
         hideCelebration();  // a new live game preempts any lingering celebration
+        hideLossReveal();
         document.getElementById('game-mode').classList.remove('hidden');
-        document.getElementById('timeline-box').replaceChildren(
-            Object.assign(document.createElement('span'), {
-                id: 'timeline-waiting', textContent: 'Loading timeline…'
-            })
-        );
+        document.getElementById('timeline-box').replaceChildren(buildTimelinePlaceholder());
         var frame = document.getElementById('timeline-frame');
         var url = '/temporal-ui/namespaces/default/workflows/' + encodeURIComponent(workflowId) + '/' + encodeURIComponent(runId) + '/timeline';
         if (frame.src !== window.location.origin + url) frame.src = url;
@@ -357,49 +394,84 @@
         celebrationTimer = setTimeout(hideCelebration, WIN_CELEBRATION_MS);
     }
 
-    function pollLastWin() {
-        if (isGameMode) return;  // never interrupt a live game
-        fetch('/api/last-win')
-            .then(function (res) { return res.json(); })
-            .then(function (data) {
-                if (!data.win) return;
-                var key = data.win.submitted_at;
-                if (key === lastWinKey) return;  // already seen — fire once
-                lastWinKey = key;
-                if (!celebrating && !isGameMode) celebrateWin(data.win);
-            })
-            .catch(function () { /* ignore transient fetch errors */ });
+    function applyWin(win, suppressCelebration) {
+        if (!win) return;
+        var key = win.submitted_at;
+        if (key === lastWinKey) return;  // already seen — fire once
+        lastWinKey = key;
+        if (!suppressCelebration && !celebrating && !isGameMode) celebrateWin(win);
     }
 
-    // Record the current win (if any) without celebrating, so a stale win that
-    // predates page load doesn't trigger a celebration on boot.
-    function primeLastWin() {
-        return fetch('/api/last-win')
-            .then(function (res) { return res.json(); })
-            .then(function (data) { if (data.win) lastWinKey = data.win.submitted_at; })
-            .catch(function () { /* ignore */ });
+    // ── Loss reveal ─────────────────────────────────────────────────────────
+    var lastLossKey = null;
+    var lossTimer = null;
+
+    function hideLossReveal() {
+        if (lossTimer) { clearTimeout(lossTimer); lossTimer = null; }
+        var panel = document.getElementById('loss-reveal');
+        if (panel) panel.classList.add('hidden');
+    }
+
+    function revealLoss(loss) {
+        var word = String(loss.target_word || '').toUpperCase();
+        if (!word) return;
+        var wordEl = document.getElementById('loss-word');
+        if (!wordEl) return;
+        wordEl.replaceChildren();
+        word.split('').forEach(function (letter) {
+            var tile = document.createElement('span');
+            tile.className = 'loss-letter';
+            tile.textContent = letter;
+            wordEl.appendChild(tile);
+        });
+        var detail = document.getElementById('loss-detail');
+        if (detail) {
+            if (loss.status === 'abandoned') {
+                detail.textContent = 'Time expired before the next guess';
+            } else {
+                detail.textContent = 'Solved by the workflow after ' + loss.guesses + ' guesses';
+            }
+        }
+        document.getElementById('loss-reveal').classList.remove('hidden');
+        if (lossTimer) clearTimeout(lossTimer);
+        lossTimer = setTimeout(hideLossReveal, LOSS_REVEAL_MS);
+    }
+
+    function applyLoss(loss, suppressReveal) {
+        if (!loss) return;
+        var key = loss.workflow_id + ':' + loss.run_id + ':lost';
+        if (key === lastLossKey) return;
+        lastLossKey = key;
+        if (!suppressReveal && !isGameMode) revealLoss(loss);
     }
 
     // ── Polling ────────────────────────────────────────────────────────────
     var isGameMode = false;
+    var seenInitialDisplayState = false;
 
-    function poll() {
-        fetch('/api/active-game')
+    function applyActiveGame(data) {
+        if (data && data.workflow_id && data.run_id) {
+            if (!isGameMode || data.workflow_id !== activeWorkflowId) {
+                isGameMode = true;
+                showGameMode(data.workflow_id, data.run_id);
+            }
+        } else if (isGameMode) {
+            isGameMode = false;
+            activeWorkflowId = null;
+            stopGameMode();
+            startAttract();
+        }
+    }
+
+    function pollDisplayState() {
+        fetch('/api/display-state')
             .then(function (res) { return res.json(); })
             .then(function (data) {
-                if (data.workflow_id && data.run_id) {
-                    if (!isGameMode || data.workflow_id !== activeWorkflowId) {
-                        isGameMode = true;
-                        showGameMode(data.workflow_id, data.run_id);
-                    }
-                } else {
-                    if (isGameMode) {
-                        isGameMode = false;
-                        activeWorkflowId = null;
-                        stopGameMode();
-                        startAttract();
-                    }
-                }
+                applyLeaderboard(data.leaderboard);
+                applyActiveGame(data.active_game);
+                applyWin(data.win, !seenInitialDisplayState);
+                applyLoss(data.loss, !seenInitialDisplayState);
+                seenInitialDisplayState = true;
             })
             .catch(function () { /* silently ignore poll errors */ });
     }
@@ -468,13 +540,8 @@
         if (displayStarted) return;
         displayStarted = true;
         startAttract();
-        poll();
-        setInterval(poll, POLL_INTERVAL_MS);
-        refreshLeaderboard();
-        setInterval(refreshLeaderboard, LEADERBOARD_REFRESH_MS);
-        // Prime the last-win key so a pre-existing win doesn't celebrate on boot,
-        // then poll for fresh wins to fire the celebration once each.
-        primeLastWin().then(function () { setInterval(pollLastWin, WIN_POLL_MS); });
+        pollDisplayState();
+        setInterval(pollDisplayState, DISPLAY_REFRESH_MS);
     }
 
     function saveAndLaunch() {

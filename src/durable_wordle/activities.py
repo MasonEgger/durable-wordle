@@ -35,10 +35,16 @@ def validate_guess(activity_input: ValidateGuessInput) -> bool:
     if is_valid_guess(word):
         activity.logger.info("validate_guess: %s → valid (local list)", word)
         return True
-    response = requests.get(
-        f"{DICTIONARY_API_URL}/{word.lower()}",
-        timeout=5,
-    )
+    try:
+        response = requests.get(
+            f"{DICTIONARY_API_URL}/{word.lower()}",
+            timeout=2,
+        )
+    except requests.RequestException as err:
+        activity.logger.warning(
+            "validate_guess: %s → dictionary lookup failed: %s", word, err
+        )
+        return False
     is_valid: bool = response.status_code == 200
     activity.logger.info(
         "validate_guess: %s → %s (status=%d)",

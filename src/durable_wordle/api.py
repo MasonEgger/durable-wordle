@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from temporalio.client import (
@@ -29,6 +29,7 @@ from durable_wordle.leaderboard import (
     get_madlib_pairs,
     get_recent_win,
     get_top_entries_for_date,
+    record_participant,
 )
 from durable_wordle.models import (
     GameState,
@@ -224,6 +225,54 @@ def create_app(
     app.include_router(proxy_router)  # /temporal-ui/* + /api/v1/* → Temporal UI
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+    def _share_context(
+        request: Request, game_state: GameState | None
+    ) -> dict[str, Any]:
+        guesses = game_state.guesses if game_state else []
+        elapsed_seconds = 0
+        if game_state and game_state.started_at:
+            started_at = game_state.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=datetime.UTC)
+            now = datetime.datetime.now(datetime.UTC)
+            elapsed_seconds = max(0, int((now - started_at).total_seconds()))
+
+        emoji_grid = "\n".join(
+            "".join(SHARE_EMOJI[feedback.value] for feedback in guess.feedback)
+            for guess in guesses
+        )
+
+        return {
+            "request": request,
+            "guesses": guesses,
+            "tile_feedback_css": TILE_FEEDBACK_CSS,
+            "player_name": request.cookies.get("player_name", ""),
+            "guess_count": len(guesses),
+            "elapsed_formatted": format_elapsed(elapsed_seconds),
+            "won": bool(game_state and game_state.status == "won"),
+            "emoji_grid": emoji_grid,
+        }
+
+    def _render_share_screen(
+        request: Request,
+        session_id: str,
+        is_new_session: bool,
+        game_state: GameState | None,
+        *,
+        retarget_screen: bool = False,
+    ) -> HTMLResponse:
+        response = templates.TemplateResponse(
+            request=request,
+            name="_share_screen.html",
+            context=_share_context(request, game_state),
+        )
+        if retarget_screen:
+            response.headers["HX-Retarget"] = "#screen"
+            response.headers["HX-Reswap"] = "innerHTML"
+        if is_new_session:
+            response.set_cookie(key="session_id", value=session_id, httponly=True)
+        return response
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         """Return application health status.
@@ -233,15 +282,26 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/new-game")
-    async def new_game() -> RedirectResponse:
-        """Start a new random game by clearing cookies and redirecting.
+    async def new_game(request: Request) -> Response:
+        """Start a new random game by clearing cookies and redirecting or swapping.
 
         Sets a fresh game_id and clears the session_id so the player
         gets a completely new workflow.
 
-        :returns: A redirect to the home page with fresh cookies.
+        :param request: The incoming HTTP request.
+        :returns: A redirect or start-screen fragment with fresh cookies.
         """
-        response = RedirectResponse(url="/", status_code=302)
+        response: Response
+        if request.headers.get("HX-Request") == "true":
+            response = templates.TemplateResponse(
+                request=request,
+                name="_start_screen.html",
+                context={},
+            )
+            response.headers["HX-Push-Url"] = "/"
+        else:
+            response = RedirectResponse(url="/", status_code=302)
+
         new_game_id = str(uuid.uuid4())
         response.set_cookie(key="game_id", value=new_game_id, httponly=True)
         response.delete_cookie(key="session_id")
@@ -338,6 +398,16 @@ def create_app(
             response.set_cookie(
                 key="madlib_verb", value=madlib_verb.strip().upper(), httponly=True
             )
+
+        # Record everyone who plays (win or lose) for post-event email outreach —
+        # not just winners who land on the leaderboard. No-op when email is blank.
+        record_participant(
+            player_name=player_name or "Anonymous",
+            email=(email or "").strip(),
+            madlib_noun=(madlib_noun or "").strip().upper(),
+            madlib_verb=(madlib_verb or "").strip().upper(),
+            game_date=_today_la(),
+        )
         return response
 
     @app.post("/guess", response_class=HTMLResponse)
@@ -394,6 +464,21 @@ def create_app(
 
         game_state = await handle.query(UserSessionWorkflow.get_game_state)
 
+        # Auto-save the leaderboard entry the moment the game is won — this is the
+        # only successful update that yields a "won" status, so it fires exactly
+        # once (a replayed guess on a finished game errors out above and returns
+        # early). Replaces the old manual "POST TO LEADERBOARD" button.
+        if not error_message and game_state.status == "won":
+            lb_add_entry(
+                player_name=request.cookies.get("player_name", "Anonymous"),
+                email=request.cookies.get("email", ""),
+                guesses=len(game_state.guesses),
+                started_at=game_state.started_at,
+                madlib_noun=request.cookies.get("madlib_noun", ""),
+                madlib_verb=request.cookies.get("madlib_verb", ""),
+                game_date=_today_la(),
+            )
+
         response = render_board_partial(
             templates,
             request,
@@ -402,6 +487,7 @@ def create_app(
             game_state=game_state,
             error_message=error_message,
             animate=is_htmx,
+            auto_share_after_reveal=is_htmx and game_state.status == "won",
         )
         response.set_cookie(key="game_id", value=game_id, httponly=True)
         return response
@@ -416,42 +502,6 @@ def create_app(
             "madlibs_json": json.dumps(madlibs),
             "game_date": today,
         }
-
-    @app.post("/leaderboard", response_class=HTMLResponse)
-    async def post_leaderboard(request: Request) -> HTMLResponse:
-        """Submit a leaderboard entry and return the leaderboard screen fragment.
-
-        Reads game state from the current workflow and player metadata from
-        cookies, then appends a new entry to the JSON leaderboard file.
-
-        :param request: The incoming HTTP request.
-        :returns: Rendered leaderboard screen HTML fragment.
-        """
-        session_id = request.cookies.get("session_id")
-        if session_id:
-            client: Client = app.state.temporal_client
-            game_id = request.cookies.get("game_id")
-            game_state = None
-            if game_id:
-                workflow_id = get_workflow_id(game_id)
-                game_state = await _query_existing_game(client, workflow_id)
-
-            if game_state and game_state.status == "won":
-                lb_add_entry(
-                    player_name=request.cookies.get("player_name", "Anonymous"),
-                    email=request.cookies.get("email", ""),
-                    guesses=len(game_state.guesses),
-                    started_at=game_state.started_at,
-                    madlib_noun=request.cookies.get("madlib_noun", ""),
-                    madlib_verb=request.cookies.get("madlib_verb", ""),
-                    game_date=_today_la(),
-                )
-
-        return templates.TemplateResponse(
-            request=request,
-            name="_leaderboard_screen.html",
-            context=_leaderboard_context(request),
-        )
 
     @app.get("/leaderboard-screen", response_class=HTMLResponse)
     async def leaderboard_screen(request: Request) -> HTMLResponse:
@@ -517,48 +567,22 @@ def create_app(
         if game_id:
             game_state = await _query_existing_game(client, get_workflow_id(game_id))
 
-        guesses = game_state.guesses if game_state else []
-        elapsed_seconds = 0
-        if game_state and game_state.started_at:
-            started_at = game_state.started_at
-            if started_at.tzinfo is None:
-                started_at = started_at.replace(tzinfo=datetime.UTC)
-            now = datetime.datetime.now(datetime.UTC)
-            elapsed_seconds = max(0, int((now - started_at).total_seconds()))
-
-        emoji_grid = "\n".join(
-            "".join(SHARE_EMOJI[fb.value] for fb in guess.feedback) for guess in guesses
+        return _render_share_screen(
+            request,
+            session_id,
+            is_new_session,
+            game_state,
         )
 
-        context: dict[str, Any] = {
-            "request": request,
-            "guesses": guesses,
-            "tile_feedback_css": TILE_FEEDBACK_CSS,
-            "player_name": request.cookies.get("player_name", ""),
-            "guess_count": len(guesses),
-            "elapsed_formatted": format_elapsed(elapsed_seconds),
-            "won": bool(game_state and game_state.status == "won"),
-            "emoji_grid": emoji_grid,
-        }
-        response = templates.TemplateResponse(
-            request=request, name="_share_screen.html", context=context
-        )
-        if is_new_session:
-            response.set_cookie(key="session_id", value=session_id, httponly=True)
-        return response
+    def _leaderboard_payload(game_date: str) -> dict[str, Any]:
+        """Build the JSON leaderboard payload for the display.
 
-    @app.get("/api/leaderboard")
-    async def api_leaderboard(request: Request) -> dict[str, Any]:
-        """Return today's leaderboard as JSON for the live-updating display.
-
-        :param request: The incoming HTTP request.
-        :returns: Dict with ``game_date``, ``entries`` (rank/name/guesses/time),
-            and deduplicated ``madlibs`` pairs.
+        :param game_date: Booth-local ISO date string.
+        :returns: Leaderboard entries and madlib pairs.
         """
-        today = _today_la()
-        entries = get_top_entries_for_date(today)
+        entries = get_top_entries_for_date(game_date)
         return {
-            "game_date": today,
+            "game_date": game_date,
             "entries": [
                 {
                     "player_name": entry.player_name,
@@ -570,44 +594,34 @@ def create_app(
             "madlibs": get_madlib_pairs(entries),
         }
 
-    @app.get("/api/last-win")
-    async def last_win(request: Request) -> dict[str, Any]:
-        """Return the most recent winning entry within the last few seconds.
+    def _recent_win_payload(game_date: str) -> dict[str, Any] | None:
+        """Build the fresh-win payload for the display.
 
-        The display polls this to fire a one-off win celebration. Returns
-        ``{"win": null}`` when there is no fresh win; otherwise the entry's
-        name, guess count, formatted time, day rank, and ``submitted_at``
-        (used client-side to dedupe so each win celebrates exactly once).
-
-        :param request: The incoming HTTP request.
-        :returns: Dict with a ``win`` object, or ``{"win": null}`` when idle.
+        :param game_date: Booth-local ISO date string.
+        :returns: Win payload, or ``None`` when there is no fresh win.
         """
-        result = get_recent_win(_today_la())
+        result = get_recent_win(game_date)
         if result is None:
-            return {"win": None}
+            return None
         entry, rank = result
         return {
-            "win": {
-                "player_name": entry.player_name,
-                "guesses": entry.guesses,
-                "elapsed_formatted": entry.elapsed_formatted,
-                "rank": rank,
-                "submitted_at": entry.submitted_at,
-            }
+            "player_name": entry.player_name,
+            "guesses": entry.guesses,
+            "elapsed_formatted": entry.elapsed_formatted,
+            "rank": rank,
+            "submitted_at": entry.submitted_at,
         }
 
-    @app.get("/api/active-game")
-    async def active_game(request: Request) -> dict[str, str | None]:
+    async def _active_game_payload(client: Client) -> dict[str, str | None]:
         """Return the most recently started running game workflow, if any.
 
         Orders running ``UserSessionWorkflow`` executions by start time so the
         display always tracks the newest game even if stale workflows linger.
         Returns ``null`` values when no game is active.
 
-        :param request: The incoming HTTP request.
+        :param client: The Temporal client.
         :returns: Dict with ``workflow_id`` and ``run_id``, or nulls if idle.
         """
-        client: Client = request.app.state.temporal_client
         query = 'WorkflowType="UserSessionWorkflow" AND ExecutionStatus="Running"'
         try:
             running = [execution async for execution in client.list_workflows(query)]
@@ -625,6 +639,100 @@ def create_app(
             ),
         )
         return {"workflow_id": newest.id, "run_id": newest.run_id}
+
+    async def _recent_loss_payload(client: Client) -> dict[str, Any] | None:
+        """Return the most recently closed reveal-worthy game.
+
+        Losses and inactivity timeouts are not stored in SQLite, so the display
+        reads them from the completed workflow state.
+
+        :param client: The Temporal client.
+        :returns: Loss/timeout payload, or ``None`` when no recent reveal exists.
+        """
+        query = 'WorkflowType="UserSessionWorkflow" AND ExecutionStatus="Completed"'
+        try:
+            completed = [execution async for execution in client.list_workflows(query)]
+        except Exception:
+            return None
+        newest_first = sorted(
+            completed,
+            key=lambda execution: (
+                execution.close_time
+                or execution.start_time
+                or datetime.datetime.min.replace(tzinfo=datetime.UTC)
+            ),
+            reverse=True,
+        )
+        for execution in newest_first[:10]:
+            try:
+                game_state = await client.get_workflow_handle(execution.id).query(
+                    UserSessionWorkflow.get_game_state
+                )
+            except RPCError:
+                continue
+            if game_state.status not in ("lost", "abandoned"):
+                continue
+            return {
+                "workflow_id": execution.id,
+                "run_id": execution.run_id,
+                "target_word": game_state.target_word,
+                "guesses": len(game_state.guesses),
+                "status": game_state.status,
+            }
+        return None
+
+    @app.get("/api/leaderboard")
+    async def api_leaderboard(request: Request) -> dict[str, Any]:
+        """Return today's leaderboard as JSON for the live-updating display.
+
+        :param request: The incoming HTTP request.
+        :returns: Dict with ``game_date``, ``entries`` (rank/name/guesses/time),
+            and deduplicated ``madlibs`` pairs.
+        """
+        return _leaderboard_payload(_today_la())
+
+    @app.get("/api/last-win")
+    async def last_win(request: Request) -> dict[str, Any]:
+        """Return the most recent winning entry within the last few seconds.
+
+        The display polls this to fire a one-off win celebration. Returns
+        ``{"win": null}`` when there is no fresh win; otherwise the entry's
+        name, guess count, formatted time, day rank, and ``submitted_at``
+        (used client-side to dedupe so each win celebrates exactly once).
+
+        :param request: The incoming HTTP request.
+        :returns: Dict with a ``win`` object, or ``{"win": null}`` when idle.
+        """
+        return {"win": _recent_win_payload(_today_la())}
+
+    @app.get("/api/active-game")
+    async def active_game(request: Request) -> dict[str, str | None]:
+        """Return the most recently started running game workflow, if any.
+
+        :param request: The incoming HTTP request.
+        :returns: Dict with ``workflow_id`` and ``run_id``, or nulls if idle.
+        """
+        client: Client = request.app.state.temporal_client
+        return await _active_game_payload(client)
+
+    @app.get("/api/display-state")
+    async def display_state(request: Request) -> dict[str, Any]:
+        """Return all display data in one polling response.
+
+        This keeps the second-screen booth display from issuing separate
+        active-game, leaderboard, and recent-win requests on every interval.
+
+        :param request: The incoming HTTP request.
+        :returns: Active game, leaderboard, and fresh-win payloads.
+        """
+        client: Client = request.app.state.temporal_client
+        today = _today_la()
+        return {
+            "active_game": await _active_game_payload(client),
+            "leaderboard": _leaderboard_payload(today),
+            "win": _recent_win_payload(today),
+            "loss": await _recent_loss_payload(client),
+        }
 
     @app.get("/display", response_class=HTMLResponse)
     async def display(request: Request) -> HTMLResponse:
@@ -665,6 +773,15 @@ def create_production_app() -> FastAPI:
     :returns: A configured FastAPI application instance.
     """
     from temporalio.envconfig import ClientConfigProfile
+
+    temporal_address = os.environ.get("TEMPORAL_ADDRESS")
+    temporal_namespace = os.environ.get("TEMPORAL_NAMESPACE", "default")
+    if temporal_address:
+        return create_app(
+            temporal_url=temporal_address,
+            temporal_namespace=temporal_namespace,
+            task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "wordle-tasks"),
+        )
 
     config_file = Path(__file__).resolve().parent.parent.parent / "temporal.toml"
     profile = ClientConfigProfile.load(config_source=config_file)

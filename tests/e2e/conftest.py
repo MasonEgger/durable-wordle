@@ -8,14 +8,12 @@ import subprocess
 import tempfile
 import time
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_TEMPORAL_PORT = 7233  # matches temporal.toml so the app/worker connect by default
-_APP_PORT = 8042  # distinct from the booth's 8000 so a running booth is untouched
 
 
 def _port_busy(port: int) -> bool:
@@ -25,21 +23,28 @@ def _port_busy(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _wait_for(check: object, timeout: float, interval: float = 0.5) -> bool:
+def _find_free_port() -> int:
+    """Ask the OS for an available TCP port on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _wait_for(check: Callable[[], bool], timeout: float, interval: float = 0.5) -> bool:
     """Poll ``check`` (a no-arg callable) until it is truthy or the timeout lapses."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if check():  # type: ignore[operator]
+        if check():
             return True
         time.sleep(interval)
     return False
 
 
-def _health_ok() -> bool:
+def _health_ok(app_port: int) -> bool:
     """Return True once the web app's health endpoint responds 200."""
     try:
         with urllib.request.urlopen(
-            f"http://localhost:{_APP_PORT}/health", timeout=1
+            f"http://localhost:{app_port}/health", timeout=1
         ) as response:
             return response.status == 200
     except Exception:
@@ -56,14 +61,19 @@ def live_server() -> Iterator[str]:
     """
     if shutil.which("temporal") is None:
         pytest.skip("temporal binary not on PATH")
-    for port in (_TEMPORAL_PORT, _APP_PORT):
+
+    temporal_port = _find_free_port()
+    app_port = _find_free_port()
+    for port in (temporal_port, app_port):
         if _port_busy(port):
-            pytest.skip(f"port {port} already in use (stop any running stack first)")
+            pytest.skip(f"port {port} was claimed before the test stack started")
 
     db_dir = tempfile.mkdtemp(prefix="wordle-e2e-")
     env = {
         **os.environ,
         "DURABLE_WORDLE_DB": str(Path(db_dir) / "leaderboard.db"),
+        "TEMPORAL_ADDRESS": f"localhost:{temporal_port}",
+        "TEMPORAL_NAMESPACE": "default",
         "TEMPORAL_TASK_QUEUE": "wordle-tasks",
     }
     procs: list[subprocess.Popen[bytes]] = []
@@ -76,7 +86,7 @@ def live_server() -> Iterator[str]:
         return proc
 
     try:
-        _spawn("temporal", "server", "start-dev", "--port", str(_TEMPORAL_PORT))
+        _spawn("temporal", "server", "start-dev", "--port", str(temporal_port))
         if not _wait_for(
             lambda: (
                 subprocess.run(
@@ -86,7 +96,7 @@ def live_server() -> Iterator[str]:
                         "cluster",
                         "health",
                         "--address",
-                        f"localhost:{_TEMPORAL_PORT}",
+                        f"localhost:{temporal_port}",
                     ],
                     capture_output=True,
                 ).returncode
@@ -104,12 +114,12 @@ def live_server() -> Iterator[str]:
             "--factory",
             "durable_wordle.api:create_production_app",
             "--port",
-            str(_APP_PORT),
+            str(app_port),
         )
-        if not _wait_for(_health_ok, timeout=45):
+        if not _wait_for(lambda: _health_ok(app_port), timeout=45):
             pytest.skip("web app did not become healthy in time")
 
-        yield f"http://localhost:{_APP_PORT}"
+        yield f"http://localhost:{app_port}"
     finally:
         for proc in reversed(procs):
             try:

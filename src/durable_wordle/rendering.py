@@ -63,6 +63,38 @@ def build_keyboard_state(guesses: list[GuessResult]) -> dict[str, str]:
     return letter_states
 
 
+def build_keyboard_transition_indices(guesses: list[GuessResult]) -> dict[str, int]:
+    """Map changed keyboard letters to the latest-row tile that reveals them.
+
+    A single keyboard key can correspond to multiple tiles in a duplicate-letter
+    guess. The key should flip when the tile responsible for the new best
+    keyboard state flips, not necessarily at the first matching letter.
+
+    :param guesses: The list of guess results so far.
+    :returns: A dict mapping uppercase letters to latest-row tile indexes.
+    """
+    if not guesses:
+        return {}
+
+    prior_state = build_keyboard_state(guesses[:-1])
+    final_state = build_keyboard_state(guesses)
+    latest_guess = guesses[-1]
+    transition_indices: dict[str, int] = {}
+
+    for letter_index, (letter, letter_feedback) in enumerate(
+        zip(latest_guess.word, latest_guess.feedback)
+    ):
+        final_css = final_state.get(letter)
+        if not final_css or final_css == prior_state.get(letter, "bg-wordle-key"):
+            continue
+
+        tile_css = _KEY_FEEDBACK_CSS[letter_feedback]
+        if tile_css == final_css and letter not in transition_indices:
+            transition_indices[letter] = letter_index
+
+    return transition_indices
+
+
 def friendly_error(raw_error: str) -> str:
     """Convert raw Temporal error messages into user-friendly text.
 
@@ -87,6 +119,7 @@ def game_context(
     error_message: str = "",
     status_message: str = "",
     animate: bool = False,
+    auto_share_after_reveal: bool = False,
 ) -> dict[str, Any]:
     """Build the Jinja2 context dict for game-screen and board-partial templates.
 
@@ -95,6 +128,8 @@ def game_context(
     :param error_message: Optional error message to display.
     :param status_message: Optional status message to display.
     :param animate: If True, apply tile-flip animation to the latest guess row.
+    :param auto_share_after_reveal: If True, open the share screen after the
+        latest animated row finishes revealing.
     :returns: Template context dict.
     """
     guesses = game_state.guesses if game_state else []
@@ -125,9 +160,14 @@ def game_context(
         "status_message": status_message,
         "keyboard_rows": KEYBOARD_ROWS,
         "keyboard_state": build_keyboard_state(guesses),
+        # Keyboard colours BEFORE the latest guess, so animated swaps can hold the
+        # prior colour and flip changed keys in sync with their tiles.
+        "keyboard_state_prior": build_keyboard_state(guesses[:-1]) if guesses else {},
+        "keyboard_transition_indices": build_keyboard_transition_indices(guesses),
         "tile_feedback_css": TILE_FEEDBACK_CSS,
         "has_started": len(guesses) > 0,
         "animate": animate,
+        "auto_share_after_reveal": auto_share_after_reveal,
         "started_at_ts": started_at_ts,
     }
 
@@ -180,6 +220,7 @@ def render_game_screen(
     game_state: GameState,
     error_message: str = "",
     animate: bool = False,
+    auto_share_after_reveal: bool = False,
 ) -> HTMLResponse:
     """Render just the game-screen fragment for HTMX swaps into #screen.
 
@@ -190,6 +231,8 @@ def render_game_screen(
     :param game_state: Current game state.
     :param error_message: Optional error message to display.
     :param animate: If True, apply tile-flip animation to the latest guess row.
+    :param auto_share_after_reveal: If True, open the share screen after the
+        latest animated row finishes revealing.
     :returns: Rendered HTML fragment response.
     """
     context = game_context(
@@ -197,6 +240,7 @@ def render_game_screen(
         game_state,
         error_message=error_message,
         animate=animate,
+        auto_share_after_reveal=auto_share_after_reveal,
     )
     response = templates.TemplateResponse(
         request=request, name="_game_screen.html", context=context
@@ -214,6 +258,7 @@ def render_board_partial(
     game_state: GameState,
     error_message: str = "",
     animate: bool = False,
+    auto_share_after_reveal: bool = False,
 ) -> HTMLResponse:
     """Render just the board partial for HTMX swaps into #game-content.
 
@@ -224,6 +269,8 @@ def render_board_partial(
     :param game_state: Current game state.
     :param error_message: Optional error message to display.
     :param animate: If True, apply tile-flip animation to the latest guess row.
+    :param auto_share_after_reveal: If True, open the share screen after the
+        latest animated row finishes revealing.
     :returns: Rendered HTML fragment response.
     """
     context = game_context(
@@ -231,6 +278,7 @@ def render_board_partial(
         game_state,
         error_message=error_message,
         animate=animate,
+        auto_share_after_reveal=auto_share_after_reveal,
     )
     response = templates.TemplateResponse(
         request=request, name="_board_partial.html", context=context

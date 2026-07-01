@@ -1,16 +1,25 @@
-<div id="game-screen" class="flex flex-col items-center w-full max-w-lg px-4 gap-4 screen-enter">
+<div id="game-screen" class="screen-enter">
 
     <input type="hidden" id="started-at-ts" value="{{ started_at_ts }}">
 
-    <div id="timer-area" class="font-mono font-bold text-lg text-white tracking-widest" aria-live="off" aria-label="Elapsed time">
-        00:00:00
+    <div class="game-timers" aria-live="off">
+        <div class="timer-card">
+            <span class="timer-label">Elapsed</span>
+            <span id="timer-area" class="timer-value" aria-label="Elapsed time">
+                00:00:00
+            </span>
+        </div>
+
+        <div id="countdown-area"
+             class="timer-card timer-card--center countdown-card"
+             data-total-seconds="60"
+             aria-label="Time remaining">
+            <span class="timer-label">Remaining</span>
+            <span id="countdown-value" class="timer-value">1:00</span>
+        </div>
     </div>
 
-    <div id="countdown-area" class="font-mono text-xs tracking-widest uppercase text-temporal-indigo" aria-live="off">
-        Guess within <span id="countdown-value" class="font-bold text-temporal-grellow">1:00</span>
-    </div>
-
-    <div id="game-content" class="flex flex-col items-center w-full gap-4">
+    <div id="game-content">
         {% include "_board_partial.html" %}
     </div>
 

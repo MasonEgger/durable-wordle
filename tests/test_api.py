@@ -1,5 +1,6 @@
 # ABOUTME: Tests for the FastAPI API layer covering session management,
 # game board rendering, health check, and Temporal workflow integration.
+import asyncio
 import concurrent.futures
 import pathlib
 import uuid
@@ -15,6 +16,7 @@ from durable_wordle.activities import (
     validate_guess,
 )
 from durable_wordle.api import create_app, get_workflow_id
+from durable_wordle.models import WorkflowInput
 from durable_wordle.workflow import UserSessionWorkflow
 
 
@@ -68,6 +70,29 @@ class TestSessionManagement:
             assert response.status_code == 200
             if "session_id" in response.cookies:
                 assert response.cookies["session_id"] == existing_session_id
+
+    async def test_new_game_htmx_returns_start_screen_and_resets_game_cookie(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """HTMX start-over should swap in the start screen with fresh cookies."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            client.cookies.set("session_id", str(uuid.uuid4()))
+            client.cookies.set("game_id", str(uuid.uuid4()))
+
+            response = await client.get("/new-game", headers={"HX-Request": "true"})
+
+            assert response.status_code == 200
+            assert response.headers["HX-Push-Url"] == "/"
+            assert "start-screen" in response.text
+            assert "game_id" in response.cookies
+            assert "session_id=" in response.headers["set-cookie"]
+
+
+def test_api_tests_use_throwaway_leaderboard_database() -> None:
+    """API tests should never write to the booth leaderboard database."""
+    from durable_wordle import leaderboard
+
+    assert leaderboard.DB_FILE != leaderboard._DEFAULT_DB
 
 
 class TestGuessEndpoint:
@@ -179,6 +204,10 @@ class TestTemplateRendering:
                     response = await client.post("/play")
                     body = response.text
                     assert body.count('class="guess-row') == 6
+                    assert "game-timers" in body
+                    assert "countdown-card" in body
+                    assert 'data-total-seconds="60"' in body
+                    assert "wordle-tile" in body
 
     async def test_play_returns_keyboard_section(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
@@ -292,6 +321,124 @@ class TestTemplateRendering:
                     body = response.text
                     assert "splendid" in body.lower() or "won" in body.lower()
                     assert "start over" in body.lower()
+                    # The manual "POST TO LEADERBOARD" button is gone — saving is
+                    # automatic on win now.
+                    assert "post to leaderboard" not in body.lower()
+
+    async def test_winning_htmx_guess_animates_board_before_share_screen(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """A winning HTMX guess should animate the board before opening share."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    play_response = await client.post(
+                        "/play",
+                        data={
+                            "first_name": "Ada",
+                            "last_name": "Lovelace",
+                            "email": "ada@example.com",
+                        },
+                    )
+                    game_id = play_response.cookies["game_id"]
+                    handle = workflow_environment.client.get_workflow_handle(
+                        get_workflow_id(game_id)
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+
+                    response = await client.post(
+                        "/guess",
+                        data={"guess": state.target_word},
+                        headers={"HX-Request": "true"},
+                    )
+                    body = response.text
+
+                    assert response.status_code == 200
+                    assert "HX-Retarget" not in response.headers
+                    assert "share-screen" not in body
+                    assert 'data-auto-share-after-reveal="true"' in body
+                    assert "tile-reveal" in body
+                    assert body.count('class="tile-reveal') == 5
+                    assert body.count('data-color="bg-green-500 border-green-500"') == 5
+                    assert "post to leaderboard" not in body.lower()
+
+    async def test_won_game_auto_saves_leaderboard_entry(
+        self,
+        workflow_environment: WorkflowEnvironment,
+        task_queue: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """Winning should auto-save a leaderboard entry without a manual POST."""
+        from durable_wordle import leaderboard
+        from durable_wordle.api import _today_la
+
+        monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
+        monkeypatch.setattr(leaderboard, "_schema_ready", False)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    play_response = await client.post(
+                        "/play",
+                        data={"first_name": "Ada", "email": "ada@example.com"},
+                    )
+                    game_id = play_response.cookies["game_id"]
+                    handle = workflow_environment.client.get_workflow_handle(
+                        get_workflow_id(game_id)
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+                    await client.post("/guess", data={"guess": state.target_word})
+
+                    entries = leaderboard.get_top_entries_for_date(_today_la())
+                    ada = [e for e in entries if e.player_name == "Ada"]
+                    assert len(ada) == 1
+                    assert ada[0].guesses == 1
+
+    async def test_play_records_participant_for_outreach(
+        self,
+        workflow_environment: WorkflowEnvironment,
+        task_queue: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """POST /play should record every player (win or lose) for email outreach."""
+        from durable_wordle import leaderboard
+        from durable_wordle.api import _today_la
+
+        monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
+        monkeypatch.setattr(leaderboard, "_schema_ready", False)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    await client.post(
+                        "/play",
+                        data={"first_name": "Grace", "email": "grace@example.com"},
+                    )
+
+                    participants = leaderboard.get_participants_for_date(_today_la())
+                    assert len(participants) == 1
+                    assert participants[0].player_name == "Grace"
+                    assert participants[0].email == "grace@example.com"
 
     async def test_lost_game_shows_word_and_actions(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
@@ -375,6 +522,7 @@ class TestShareEndpoint:
                     # Branding + QR to learn more about Temporal.
                     assert "temporal-logo-lockup-white.svg" in body
                     assert "temporal-qr.svg" in body
+                    assert "post to leaderboard" not in body.lower()
 
     async def test_share_without_game_renders_empty_card(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
@@ -453,6 +601,66 @@ class TestDisplayEndpoints:
             assert "game-mode" in body
             assert "/static/display.js" in body  # external module is wired up
 
+    async def test_display_calibration_uses_visible_full_circle_target(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """The calibration screen should expose a full circle and open center."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/display")
+            body = response.text
+
+            assert response.status_code == 200
+            assert 'id="cal-full-circle"' in body
+            assert 'aria-label="Circle calibration controls"' in body
+            assert 'data-nudge="center"' in body
+            display_css = pathlib.Path("static/display.css").read_text()
+            assert "top: calc(50% + 10.5vmin)" in display_css
+            assert "width: min(33vmin, 360px)" in display_css
+            assert "transform: translate(-50%, -50%)" in display_css
+
+    def test_display_content_uses_circle_safe_bounds(self) -> None:
+        """Fan display content should stay inside the calibrated circle."""
+        display_css = pathlib.Path("static/display.css").read_text()
+
+        assert "--circle-safe-w: calc(var(--circle-w) * 0.68)" in display_css
+        assert "--circle-text-w: calc(var(--circle-w) * 0.58)" in display_css
+        assert (
+            "clip-path: circle(calc(var(--circle-w) * 0.5) at 50% 50%)"
+            in display_css
+        )
+        assert "max-width: var(--circle-text-w)" in display_css
+        assert "width: var(--circle-safe-w)" in display_css
+
+    def test_display_leaderboard_scroll_reaches_bottom_quickly(self) -> None:
+        """Leaderboard display should show the bottom rows before rotating away."""
+        display_css = pathlib.Path("static/display.css").read_text()
+        display_js = pathlib.Path("static/display.js").read_text()
+
+        assert "linear 1 forwards" in display_css
+        assert "infinite alternate" not in display_css
+        assert "92%, 100% { transform: translateY(var(--lb-shift, 0)); }" in display_css
+        assert "var LB_SCROLL_SPEED = 140" in display_js
+        assert "(LB_DURATION_MS / 1000) - LB_SCROLL_END_PADDING_SECONDS" in display_js
+        assert "Math.min(" in display_js
+
+    def test_display_timeline_reuses_cached_svg_placeholder(self) -> None:
+        """Display should show a cached timeline SVG while the iframe warms up."""
+        display_js = pathlib.Path("static/display.js").read_text()
+
+        assert (
+            "var TIMELINE_CACHE_KEY = 'durable-wordle:first-timeline-svg'"
+            in display_js
+        )
+        assert "function cacheFirstTimelineSvg(svg)" in display_js
+        assert "window.sessionStorage.setItem(TIMELINE_CACHE_KEY" in display_js
+        assert "function buildTimelinePlaceholder()" in display_js
+        assert (
+            "document.getElementById('timeline-box').replaceChildren("
+            "buildTimelinePlaceholder())"
+            in display_js
+        )
+        assert "cacheFirstTimelineSvg(clone)" in display_js
+
     async def test_active_game_returns_correct_shape(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
@@ -484,6 +692,160 @@ class TestDisplayEndpoints:
                     assert data["workflow_id"] is not None
                     assert data["run_id"] is not None
                     assert data["workflow_id"].startswith("wordle-")
+
+    async def test_display_state_returns_combined_payload(
+        self,
+        workflow_environment: WorkflowEnvironment,
+        task_queue: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """GET /api/display-state should combine display polling data."""
+        from durable_wordle import leaderboard
+
+        monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
+        monkeypatch.setattr(leaderboard, "_schema_ready", False)
+
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/api/display-state")
+            assert response.status_code == 200
+            data = response.json()
+            assert "workflow_id" in data["active_game"]
+            assert "run_id" in data["active_game"]
+            assert data["leaderboard"]["entries"]
+            assert "madlibs" in data["leaderboard"]
+            assert data["win"] is None
+            assert data["loss"] is None
+
+    async def test_display_state_includes_active_game_when_running(
+        self,
+        workflow_environment: WorkflowEnvironment,
+        task_queue: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """GET /api/display-state should include the live workflow identity."""
+        from durable_wordle import leaderboard
+
+        monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
+        monkeypatch.setattr(leaderboard, "_schema_ready", False)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    await client.post("/play")
+                    response = await client.get("/api/display-state")
+                    assert response.status_code == 200
+                    active_game = response.json()["active_game"]
+                    assert active_game["workflow_id"].startswith("wordle-")
+                    assert active_game["run_id"] is not None
+
+    async def test_display_state_includes_word_after_loss(
+        self,
+        workflow_environment: WorkflowEnvironment,
+        task_queue: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """GET /api/display-state should reveal the target word after a loss."""
+        from durable_wordle import leaderboard
+
+        monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
+        monkeypatch.setattr(leaderboard, "_schema_ready", False)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    play_response = await client.post("/play")
+                    game_id = play_response.cookies["game_id"]
+                    handle = workflow_environment.client.get_workflow_handle(
+                        get_workflow_id(game_id)
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+                    target_word = state.target_word
+                    wrong_words = [
+                        word
+                        for word in [
+                            "ABOVE",
+                            "ABUSE",
+                            "ACTOR",
+                            "ADMIT",
+                            "ADOPT",
+                            "ADULT",
+                            "AFTER",
+                            "AGAIN",
+                            "AGENT",
+                        ]
+                        if word != target_word
+                    ][:6]
+                    for wrong_word in wrong_words:
+                        await client.post("/guess", data={"guess": wrong_word})
+
+                    response = await client.get("/api/display-state")
+                    assert response.status_code == 200
+                    loss = response.json()["loss"]
+                    assert loss is not None
+                    assert loss["workflow_id"] == get_workflow_id(game_id)
+                    assert loss["target_word"] == target_word
+                    assert loss["guesses"] == 6
+                    assert loss["status"] == "lost"
+
+    async def test_display_state_includes_word_after_timeout(
+        self,
+        workflow_environment: WorkflowEnvironment,
+        task_queue: str,
+    ) -> None:
+        """GET /api/display-state should reveal the word after inactivity."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                workflow_id = get_workflow_id(str(uuid.uuid4()))
+                handle = await workflow_environment.client.start_workflow(
+                    UserSessionWorkflow.run,
+                    WorkflowInput(
+                        session_id="idle-display-session",
+                        inactivity_timeout_seconds=0.1,
+                    ),
+                    id=workflow_id,
+                    task_queue=task_queue,
+                )
+                final_state = await handle.result()
+                assert final_state.status == "abandoned"
+
+                async with _make_client(workflow_environment, task_queue) as client:
+                    loss = None
+                    response = None
+                    for _attempt in range(20):
+                        response = await client.get("/api/display-state")
+                        loss = response.json()["loss"]
+                        if loss is not None:
+                            break
+                        await asyncio.sleep(0.1)
+
+                assert response is not None
+                assert response.status_code == 200
+                assert loss is not None
+                assert loss["workflow_id"] == workflow_id
+                assert loss["target_word"] == final_state.target_word
+                assert loss["guesses"] == 0
+                assert loss["status"] == "abandoned"
 
 
 class TestLastWinEndpoint:

@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 
 # Close the workflow if no guess is made within this window. Keeps abandoned
@@ -71,6 +72,11 @@ class UserSessionWorkflow:
             "Game initialized (session=%s, mode=random)",
             workflow_input.session_id,
         )
+        inactivity_timeout = INACTIVITY_TIMEOUT
+        if workflow_input.inactivity_timeout_seconds is not None:
+            inactivity_timeout = timedelta(
+                seconds=workflow_input.inactivity_timeout_seconds
+            )
 
         # Wait for the game to end, resetting an inactivity timer on each guess.
         # If no guess arrives within INACTIVITY_TIMEOUT, abandon the game so the
@@ -84,12 +90,12 @@ class UserSessionWorkflow:
             try:
                 await workflow.wait_condition(
                     _activity_or_game_over,
-                    timeout=INACTIVITY_TIMEOUT,
+                    timeout=inactivity_timeout,
                 )
             except TimeoutError:
                 self._state.status = "abandoned"
                 workflow.logger.info(
-                    "Game abandoned after %s of inactivity", INACTIVITY_TIMEOUT
+                    "Game abandoned after %s of inactivity", inactivity_timeout
                 )
                 break
 
@@ -132,6 +138,7 @@ class UserSessionWorkflow:
             validate_guess,
             ValidateGuessInput(guess=normalized_guess),
             start_to_close_timeout=timedelta(seconds=10),
+            retry_policy=RetryPolicy(maximum_attempts=1),
         )
         if not is_valid:
             workflow.logger.warning("Rejected invalid word: %s", normalized_guess)

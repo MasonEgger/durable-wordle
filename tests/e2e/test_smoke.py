@@ -1,5 +1,7 @@
 # ABOUTME: End-to-end browser smoke tests for the booth-critical flows —
 # ABOUTME: keyboard-driven start, guess submission, and the display page.
+import re
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -12,6 +14,17 @@ def _fill_start_form(page: Page) -> None:
     page.fill("input[name='email']", "ada@example.com")
 
 
+def _expect_game_board(page: Page) -> None:
+    """Wait until the workflow-backed board is visible."""
+    expect(page.locator("#game-board")).to_be_visible(timeout=15000)
+
+
+def _return_to_start_screen(page: Page) -> None:
+    """Swap back to the start screen without a browser refresh."""
+    page.get_by_role("link", name=re.compile("START OVER")).click()
+    expect(page.locator("#start-screen")).to_be_visible(timeout=10000)
+
+
 def test_start_screen_renders(live_server: str, page: Page) -> None:
     """The start screen shows the PLAY button and madlib form."""
     page.goto(f"{live_server}/")
@@ -19,14 +32,52 @@ def test_start_screen_renders(live_server: str, page: Page) -> None:
     expect(page.locator("input[name='first_name']")).to_be_visible()
 
 
-def test_play_via_keyboard_starts_game(live_server: str, page: Page) -> None:
-    """Focusing PLAY and pressing Enter starts the game (the Tab+Enter bug)."""
+def test_play_via_click_starts_game(live_server: str, page: Page) -> None:
+    """Clicking PLAY starts the game from the initial page load."""
     page.goto(f"{live_server}/")
     _fill_start_form(page)
-    page.get_by_role("button", name="PLAY").focus()
+    page.get_by_role("button", name="PLAY").click()
+    _expect_game_board(page)
+
+
+def test_play_via_enter_starts_game(live_server: str, page: Page) -> None:
+    """Pressing Enter from the form starts the game from the initial page load."""
+    page.goto(f"{live_server}/")
+    _fill_start_form(page)
+    page.locator("input[name='email']").focus()
     page.keyboard.press("Enter")
-    # The game board only renders once the workflow is running.
-    expect(page.locator("#game-board")).to_be_visible(timeout=15000)
+    _expect_game_board(page)
+
+
+def test_start_over_then_play_via_click_without_refresh(
+    live_server: str, page: Page
+) -> None:
+    """A swapped-in start screen can start the next game by clicking PLAY."""
+    page.goto(f"{live_server}/")
+    _fill_start_form(page)
+    page.get_by_role("button", name="PLAY").click()
+    _expect_game_board(page)
+
+    _return_to_start_screen(page)
+    _fill_start_form(page)
+    page.get_by_role("button", name="PLAY").click()
+    _expect_game_board(page)
+
+
+def test_start_over_then_play_via_enter_without_refresh(
+    live_server: str, page: Page
+) -> None:
+    """A swapped-in start screen can start the next game by pressing Enter."""
+    page.goto(f"{live_server}/")
+    _fill_start_form(page)
+    page.get_by_role("button", name="PLAY").click()
+    _expect_game_board(page)
+
+    _return_to_start_screen(page)
+    _fill_start_form(page)
+    page.locator("input[name='email']").focus()
+    page.keyboard.press("Enter")
+    _expect_game_board(page)
 
 
 def test_guess_submission_succeeds(live_server: str, page: Page) -> None:
@@ -34,7 +85,7 @@ def test_guess_submission_succeeds(live_server: str, page: Page) -> None:
     page.goto(f"{live_server}/")
     _fill_start_form(page)
     page.get_by_role("button", name="PLAY").click()
-    expect(page.locator("#game-board")).to_be_visible(timeout=15000)
+    _expect_game_board(page)
 
     for letter in "CRANE":
         page.keyboard.press(letter)

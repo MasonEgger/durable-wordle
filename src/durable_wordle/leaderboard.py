@@ -53,6 +53,24 @@ def _ensure_schema() -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_game_date ON entries(game_date)")
+        # Everyone who plays (win or lose) — captured at game start for post-event
+        # email outreach. Deduped per person per day via UNIQUE(email, game_date).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS participants (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_name   TEXT    NOT NULL,
+                email         TEXT    NOT NULL,
+                madlib_noun   TEXT    NOT NULL DEFAULT '',
+                madlib_verb   TEXT    NOT NULL DEFAULT '',
+                first_seen    TEXT    NOT NULL,
+                game_date     TEXT    NOT NULL,
+                UNIQUE(email, game_date)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_participants_date "
+            "ON participants(game_date)"
+        )
     _schema_ready = True
 
 
@@ -86,6 +104,85 @@ class LeaderboardEntry:
         :returns: Human-readable elapsed time string.
         """
         return format_elapsed(self.elapsed_seconds)
+
+
+@dataclass
+class Participant:
+    """A person who played on a given day (win or lose), for email outreach.
+
+    :param player_name: Display name from the start form.
+    :param email: Player email (the reason this record exists).
+    :param madlib_noun: Noun from the player's madlib.
+    :param madlib_verb: Past-tense verb from the player's madlib.
+    :param first_seen: ISO-format UTC timestamp of their first game that day.
+    :param game_date: ISO date string (YYYY-MM-DD).
+    """
+
+    player_name: str
+    email: str
+    madlib_noun: str
+    madlib_verb: str
+    first_seen: str
+    game_date: str
+
+
+def record_participant(
+    player_name: str,
+    email: str,
+    madlib_noun: str,
+    madlib_verb: str,
+    game_date: str,
+) -> None:
+    """Record a player for post-event email outreach (idempotent per email/day).
+
+    Called at game start so everyone who plays is captured — not just the
+    winners who land on the leaderboard. A no-op when ``email`` is blank.
+
+    :param player_name: Display name from the start form.
+    :param email: Player email; if blank, nothing is recorded.
+    :param madlib_noun: Noun from the player's madlib.
+    :param madlib_verb: Past-tense verb from the player's madlib.
+    :param game_date: ISO date string (YYYY-MM-DD).
+    """
+    if not email.strip():
+        return
+    _ensure_schema()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO participants
+                (player_name, email, madlib_noun, madlib_verb, first_seen, game_date)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                player_name or "Anonymous",
+                email.strip(),
+                madlib_noun,
+                madlib_verb,
+                datetime.now(UTC).isoformat(),
+                game_date,
+            ),
+        )
+
+
+def get_participants_for_date(game_date: str) -> list[Participant]:
+    """Return everyone who played on a given day (for email outreach).
+
+    :param game_date: ISO date string (YYYY-MM-DD).
+    :returns: All participants for the day, earliest first.
+    """
+    _ensure_schema()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT player_name, email, madlib_noun, madlib_verb, first_seen, game_date
+            FROM   participants
+            WHERE  game_date = ?
+            ORDER  BY first_seen ASC
+            """,
+            (game_date,),
+        ).fetchall()
+    return [Participant(**dict(row)) for row in rows]
 
 
 def add_entry(

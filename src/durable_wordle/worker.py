@@ -34,9 +34,19 @@ async def run_worker() -> None:
     ``TEMPORAL_ADDRESS``, ``TEMPORAL_NAMESPACE``, etc. or a TOML
     config file. The task queue is read from ``TEMPORAL_TASK_QUEUE``.
     """
-    profile = ClientConfigProfile.load(config_source=CONFIG_FILE)
-    connect_config = profile.to_client_connect_config()
-    client = await Client.connect(**connect_config)
+    temporal_address = os.environ.get("TEMPORAL_ADDRESS")
+    temporal_namespace = os.environ.get("TEMPORAL_NAMESPACE", "default")
+    if temporal_address:
+        client = await Client.connect(
+            temporal_address,
+            namespace=temporal_namespace,
+        )
+        target_host = temporal_address
+    else:
+        profile = ClientConfigProfile.load(config_source=CONFIG_FILE)
+        connect_config = profile.to_client_connect_config()
+        client = await Client.connect(**connect_config)
+        target_host = str(connect_config.get("target_host", "default"))
 
     with concurrent.futures.ThreadPoolExecutor() as activity_executor:
         worker = Worker(
@@ -49,7 +59,7 @@ async def run_worker() -> None:
         logging.info(
             "Worker started on task queue '%s' (host=%s)",
             TASK_QUEUE,
-            connect_config.get("target_host", "default"),
+            target_host,
         )
         await worker.run()
 

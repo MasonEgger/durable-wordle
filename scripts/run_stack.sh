@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Boot Temporal + worker + web app together with an auto-restart
-# ABOUTME: supervisor. `run_stack.sh booth` also opens the Chrome kiosks.
+# ABOUTME: supervisor. `run_stack.sh booth` also opens Chrome kiosks without reload.
 #
 # Usage: scripts/run_stack.sh [dev|booth]
 #   dev   - Temporal dev server + worker + FastAPI UI (Ctrl-C stops all).
@@ -18,6 +18,14 @@ MODE="${1:-dev}"
 MAX_RESTARTS=5
 RESTART_WINDOW=60
 RESTART_BACKOFF=2
+
+# Current booth display layout:
+#   TH-65EQ2 game display: -58,-1080
+#   HDMI-OPT fan display:  1862,-581 (mirrored HDMI-OPT pair shares this space)
+# Override these if macOS rearranges displays.
+BOOTH_GAME_WINDOW_POSITION="${BOOTH_GAME_WINDOW_POSITION:--58,-1080}"
+BOOTH_FAN_WINDOW_POSITION="${BOOTH_FAN_WINDOW_POSITION:-1862,-581}"
+BOOTH_WINDOW_SIZE="${BOOTH_WINDOW_SIZE:-1920,1080}"
 
 temporal_pid=""
 worker_pid=""
@@ -55,7 +63,11 @@ start_worker() {
 }
 
 start_ui() {
-    uv run uvicorn --factory durable_wordle.api:create_production_app --reload &
+    if [ "$MODE" = "booth" ]; then
+        uv run uvicorn --factory durable_wordle.api:create_production_app &
+    else
+        uv run uvicorn --factory durable_wordle.api:create_production_app --reload &
+    fi
     ui_pid=$!
 }
 
@@ -111,9 +123,19 @@ launch_kiosks() {
     flags="$flags --disable-features=Translate --disable-background-networking"
     flags="$flags --disable-sync --disable-component-update --metrics-recording-only"
     flags="$flags --log-level=3"
-    "$chrome_bin" $flags --user-data-dir="$game_profile" --app="http://localhost:8000" >/dev/null 2>&1 &
+    echo "Game kiosk target: TH-65EQ2 at ${BOOTH_GAME_WINDOW_POSITION}"
+    echo "Fan kiosk target:  HDMI-OPT at ${BOOTH_FAN_WINDOW_POSITION}"
+    "$chrome_bin" $flags \
+        --window-position="$BOOTH_GAME_WINDOW_POSITION" \
+        --window-size="$BOOTH_WINDOW_SIZE" \
+        --user-data-dir="$game_profile" \
+        --app="http://localhost:8000" >/dev/null 2>&1 &
     sleep 2
-    "$chrome_bin" $flags --user-data-dir="$display_profile" --app="http://localhost:8000/display" >/dev/null 2>&1 &
+    "$chrome_bin" $flags \
+        --window-position="$BOOTH_FAN_WINDOW_POSITION" \
+        --window-size="$BOOTH_WINDOW_SIZE" \
+        --user-data-dir="$display_profile" \
+        --app="http://localhost:8000/display" >/dev/null 2>&1 &
 }
 
 # ── Pre-flight: required ports must be free ──────────────────────────────────
