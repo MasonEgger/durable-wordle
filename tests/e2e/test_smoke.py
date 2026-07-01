@@ -126,6 +126,26 @@ def test_guess_submission_succeeds(live_server: str, page: Page) -> None:
     )
 
 
+def test_classic_absurdle_keyboard_submit_preserves_mode(
+    classic_live_server: str, page: Page
+) -> None:
+    """Keyboard Enter should include the selected classic game mode."""
+    page.goto(f"{classic_live_server}/")
+    _expect_game_board(page)
+    page.locator("input[name='game_mode'][value='absurdle']").check()
+    page.locator("#game-board").click()
+
+    for letter in "ADIEU":
+        page.keyboard.press(letter)
+    with page.expect_response("**/guess") as response_info:
+        page.keyboard.press("Enter")
+
+    status = response_info.value.status
+    assert status == 200, f"classic Absurdle guess returned {status}"
+    cookies = {cookie["name"]: cookie["value"] for cookie in page.context.cookies()}
+    assert cookies["game_mode"] == "absurdle"
+
+
 def test_display_page_loads(live_server: str, page: Page) -> None:
     """The /display second screen loads and its external JS runs.
 

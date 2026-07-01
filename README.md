@@ -40,6 +40,24 @@ flowchart LR
 - **Inactivity timeout** — a game with no guesses for 60s completes as `abandoned`, so the booth display returns to idle and stale workflows don't pile up
 - **Fully playable via CLI** — the workflow is the complete game; the web UI is just a skin (see [Playing via Temporal CLI](#playing-via-temporal-cli))
 
+### Absurdle Mode
+
+Absurdle follows [qntm's original algorithm](https://qntm.org/absurdle): player
+guesses are validated against the large valid-guess list, but the adversarial
+hidden candidate set starts from the smaller answer list. The workflow does not
+pick a secret word up front. Instead, each guess calls the
+`choose_absurdle_feedback` activity, which:
+
+1. partitions the remaining answer candidates by the Wordle feedback they would
+   produce for that guess,
+2. chooses the largest partition to discard as little information as possible,
+3. uses deterministic tie-breakers that prefer fewer green and yellow letters,
+4. stores the selected partition back in workflow state as
+   `remaining_candidates`.
+
+When only one answer remains, the mode behaves like normal Wordle until the
+player guesses that word or runs out of attempts.
+
 ## Prerequisites
 
 - **Python 3.12+**

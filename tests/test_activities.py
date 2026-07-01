@@ -171,6 +171,28 @@ class TestChooseAbsurdleFeedback:
         assert result.feedback != [LetterFeedback.CORRECT] * 5
         assert result.candidates == ["BRICK", "GHOST"]
 
+    def test_inch_corridor_keeps_other_answer_candidates(
+        self, activity_environment: ActivityEnvironment
+    ) -> None:
+        """Absurdle should force the player through same-pattern corridors."""
+        result = activity_environment.run(
+            choose_absurdle_feedback,
+            AbsurdleFeedbackInput(
+                guess="WINCH",
+                candidates=["CINCH", "PINCH", "WINCH"],
+            ),
+        )
+
+        assert result.feedback == [
+            LetterFeedback.ABSENT,
+            LetterFeedback.CORRECT,
+            LetterFeedback.CORRECT,
+            LetterFeedback.CORRECT,
+            LetterFeedback.CORRECT,
+        ]
+        assert result.candidates == ["CINCH", "PINCH"]
+        assert result.reveal_word == "CINCH"
+
     def test_returns_all_correct_when_only_candidate_matches_guess(
         self, activity_environment: ActivityEnvironment
     ) -> None:

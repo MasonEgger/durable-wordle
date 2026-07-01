@@ -330,8 +330,45 @@ class TestUserSessionWorkflow:
                 assert result.word == "CRANE"
                 assert state.game_mode is GameMode.ABSURDLE
                 assert state.status == "playing"
-                assert 0 < len(state.remaining_candidates) < len(VALID_GUESSES)
+                assert 0 < len(state.remaining_candidates) < len(ANSWER_LIST)
                 assert state.target_word in state.remaining_candidates
+
+    async def test_absurdle_uses_answer_list_candidates_but_accepts_valid_guesses(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Absurdle should match qntm: answer candidates are narrower than guesses."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=WORKFLOW_ACTIVITIES,
+                activity_executor=executor,
+            ):
+                handle = await workflow_environment.client.start_workflow(
+                    UserSessionWorkflow.run,
+                    WorkflowInput(
+                        session_id="absurdle-valid-guess-session",
+                        game_mode=GameMode.ABSURDLE,
+                    ),
+                    id=str(uuid.uuid4()),
+                    task_queue=task_queue,
+                )
+
+                initial_state = await handle.query(UserSessionWorkflow.get_game_state)
+                assert len(initial_state.remaining_candidates) == len(ANSWER_LIST)
+                assert "ADIEU" in VALID_GUESSES
+                assert "ADIEU" not in ANSWER_LIST
+
+                result = await handle.execute_update(
+                    UserSessionWorkflow.make_guess,
+                    MakeGuessInput(guess="ADIEU"),
+                )
+
+                state = await handle.query(UserSessionWorkflow.get_game_state)
+                assert result.word == "ADIEU"
+                assert state.status == "playing"
+                assert 0 < len(state.remaining_candidates) < len(ANSWER_LIST)
 
 
 class TestInactivityTimeout:

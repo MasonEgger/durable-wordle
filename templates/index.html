@@ -309,13 +309,20 @@
         }
         // Post the guess explicitly. htmx.trigger(form, 'submit') fires a
         // synthetic submit that HTMX 2.x does NOT serialize, so the `guess`
-        // field was missing → 422. Passing values guarantees it's sent.
-        if (!document.getElementById('guess-form')) return;
+        // field was missing. Build values from the real form so game_mode
+        // radio buttons are submitted with keyboard and on-screen Enter.
+        var form = document.getElementById('guess-form');
+        if (!form) return;
+        var values = {};
+        new FormData(form).forEach(function(value, key) {
+            values[key] = value;
+        });
+        values.guess = currentGuess;
         setGuessInFlight(true);
         htmx.ajax('POST', '/guess', {
             target: '#game-content',
             swap: 'innerHTML',
-            values: { guess: currentGuess }
+            values: values
         });
     }
 

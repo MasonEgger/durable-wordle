@@ -30,7 +30,7 @@ with workflow.unsafe.imports_passed_through():
         ValidateGuessInput,
         WorkflowInput,
     )
-    from durable_wordle.word_lists import VALID_GUESSES
+    from durable_wordle.word_lists import ANSWER_LIST
 
 
 @workflow.defn
@@ -70,7 +70,7 @@ class UserSessionWorkflow:
                 target_word="",
                 started_at=workflow.now(),
                 game_mode=GameMode.ABSURDLE,
-                remaining_candidates=sorted(VALID_GUESSES),
+                remaining_candidates=sorted(ANSWER_LIST),
             )
         else:
             game_date = ""

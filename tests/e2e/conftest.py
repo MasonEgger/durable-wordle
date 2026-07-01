@@ -51,13 +51,11 @@ def _health_ok(app_port: int) -> bool:
         return False
 
 
-@pytest.fixture(scope="session")
-def live_server() -> Iterator[str]:
-    """Boot Temporal + worker + web app as subprocesses; yield the base URL.
+def _run_live_server(app_mode: str) -> Iterator[str]:
+    """Boot Temporal + worker + web app as subprocesses.
 
-    Skips when the ``temporal`` binary is unavailable or the required ports are
-    already in use (e.g. a booth is running). Uses a throwaway leaderboard DB so
-    tests never touch real data.
+    :param app_mode: Runtime mode to pass to the FastAPI factory.
+    :yields: The base URL for the started web app.
     """
     if shutil.which("temporal") is None:
         pytest.skip("temporal binary not on PATH")
@@ -72,6 +70,7 @@ def live_server() -> Iterator[str]:
     env = {
         **os.environ,
         "DURABLE_WORDLE_DB": str(Path(db_dir) / "leaderboard.db"),
+        "DURABLE_WORDLE_APP_MODE": app_mode,
         "TEMPORAL_ADDRESS": f"localhost:{temporal_port}",
         "TEMPORAL_NAMESPACE": "default",
         "TEMPORAL_TASK_QUEUE": "wordle-tasks",
@@ -132,3 +131,15 @@ def live_server() -> Iterator[str]:
             except subprocess.TimeoutExpired:
                 proc.kill()
         shutil.rmtree(db_dir, ignore_errors=True)
+
+
+@pytest.fixture(scope="session")
+def live_server() -> Iterator[str]:
+    """Boot the booth-mode stack for full-stack browser tests."""
+    yield from _run_live_server("booth")
+
+
+@pytest.fixture(scope="session")
+def classic_live_server() -> Iterator[str]:
+    """Boot the classic-mode stack for board-first browser tests."""
+    yield from _run_live_server("classic")
