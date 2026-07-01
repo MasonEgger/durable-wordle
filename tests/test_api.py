@@ -3,6 +3,7 @@
 import asyncio
 import concurrent.futures
 import json
+import logging
 import pathlib
 import uuid
 
@@ -16,7 +17,11 @@ from durable_wordle.activities import (
     select_word,
     validate_guess,
 )
-from durable_wordle.api import create_app, get_workflow_id
+from durable_wordle.api import (
+    _TemporalUiStaticAccessLogFilter,
+    create_app,
+    get_workflow_id,
+)
 from durable_wordle.models import WorkflowInput
 from durable_wordle.workflow import UserSessionWorkflow
 
@@ -33,6 +38,19 @@ def _make_client(
     app.state.task_queue = task_queue
     transport = ASGITransport(app=app)  # type: ignore[arg-type]
     return AsyncClient(transport=transport, base_url="http://test")
+
+
+def _access_log_record(path: str) -> logging.LogRecord:
+    """Build a uvicorn-style access log record for filter tests."""
+    return logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:12345", "GET", path, "1.1", 200),
+        exc_info=None,
+    )
 
 
 class TestHealthEndpoint:
@@ -687,6 +705,20 @@ class TestDisplayEndpoints:
             "buildTimelinePlaceholder())" in display_js
         )
         assert "cacheFirstTimelineSvg(clone)" in display_js
+
+    def test_temporal_ui_static_chunks_are_filtered_from_access_logs(self) -> None:
+        """Temporal UI static chunks should not flood booth startup logs."""
+        log_filter = _TemporalUiStaticAccessLogFilter()
+
+        assert not log_filter.filter(
+            _access_log_record("/temporal-ui/_app/immutable/chunks/logs.DMq1sQw1.js")
+        )
+        assert log_filter.filter(
+            _access_log_record(
+                "/temporal-ui/namespaces/default/workflows/example/run/timeline"
+            )
+        )
+        assert log_filter.filter(_access_log_record("/api/display-state"))
 
     async def test_active_game_returns_correct_shape(
         self, workflow_environment: WorkflowEnvironment, task_queue: str

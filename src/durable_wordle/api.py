@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import json
+import logging
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -47,6 +48,7 @@ from durable_wordle.rendering import (
 from durable_wordle.workflow import UserSessionWorkflow
 
 _LA_TZ = ZoneInfo("America/Los_Angeles")
+_TEMPORAL_UI_STATIC_ACCESS_LOG_PREFIX = "/temporal-ui/_app/immutable/"
 
 
 def _today_la() -> str:
@@ -58,6 +60,38 @@ def _today_la() -> str:
     :returns: ISO date string in America/Los_Angeles.
     """
     return datetime.datetime.now(_LA_TZ).strftime("%Y-%m-%d")
+
+
+def _access_log_request_path(record: logging.LogRecord) -> str | None:
+    """Extract the request path from uvicorn's structured access-log args."""
+    if not isinstance(record.args, tuple) or len(record.args) < 3:
+        return None
+    request_path = record.args[2]
+    if not isinstance(request_path, str):
+        return None
+    return request_path
+
+
+class _TemporalUiStaticAccessLogFilter(logging.Filter):
+    """Suppress noisy Temporal UI static asset access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Return ``False`` for proxied Temporal UI immutable static chunks."""
+        request_path = _access_log_request_path(record)
+        if request_path is None:
+            return True
+        return not request_path.startswith(_TEMPORAL_UI_STATIC_ACCESS_LOG_PREFIX)
+
+
+def _configure_access_log_filters() -> None:
+    """Install booth-specific uvicorn access-log filters once per process."""
+    access_logger = logging.getLogger("uvicorn.access")
+    has_filter = any(
+        isinstance(existing_filter, _TemporalUiStaticAccessLogFilter)
+        for existing_filter in access_logger.filters
+    )
+    if not has_filter:
+        access_logger.addFilter(_TemporalUiStaticAccessLogFilter())
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -206,6 +240,7 @@ def create_app(
     :param temporal_client: Optional pre-connected Temporal client (for testing).
     :returns: A configured FastAPI application instance.
     """
+    _configure_access_log_filters()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
