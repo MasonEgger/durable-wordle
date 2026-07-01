@@ -86,10 +86,30 @@
     }
 
     // ── Live leaderboard ─────────────────────────────────────────────────────
-    function escapeHtml(value) {
-        var div = document.createElement('div');
-        div.textContent = value == null ? '' : String(value);
-        return div.innerHTML;
+    function makeSpan(className, text) {
+        var span = document.createElement('span');
+        span.className = className;
+        span.textContent = text == null ? '' : String(text);
+        return span;
+    }
+
+    function buildLeaderboardRow(entry, index) {
+        var rank = index + 1;
+        var row = document.createElement('div');
+        row.className = 'lb-row' + (rank <= 3 ? ' top' : '');
+
+        var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈'
+            : rank === 3 ? '🥉' : (rank + '.');
+        var rankClass = rank === 1 ? ' lb-rank--first'
+            : (rank === 2 || rank === 3) ? ' lb-rank--podium'
+            : ' lb-rank--standard';
+        var words = entry.guesses + ' word' + (entry.guesses === 1 ? '' : 's');
+
+        row.appendChild(makeSpan('lb-rank' + rankClass, medal));
+        row.appendChild(makeSpan('lb-name', entry.player_name));
+        row.appendChild(makeSpan('lb-guesses', words));
+        row.appendChild(makeSpan('lb-time', entry.elapsed_formatted));
+        return row;
     }
 
     function applyLeaderboard(data) {
@@ -97,21 +117,12 @@
         if (data.madlibs && data.madlibs.length) madlibs = data.madlibs;
         var list = document.getElementById('lb-list');
         if (!list || !data.entries) return;
-        list.innerHTML = data.entries.map(function (entry, index) {
-            var rank = index + 1;
-            var medal = rank === 1 ? '🥇' : rank === 2 ? '🥈'
-                : rank === 3 ? '🥉' : (rank + '.');
-            var rankClass = rank === 1 ? ' lb-rank--first'
-                : (rank === 2 || rank === 3) ? ' lb-rank--podium'
-                : ' lb-rank--standard';
-            var words = entry.guesses + ' word' + (entry.guesses === 1 ? '' : 's');
-            return '<div class="lb-row' + (rank <= 3 ? ' top' : '') + '">'
-                + '<span class="lb-rank' + rankClass + '">' + medal + '</span>'
-                + '<span class="lb-name">' + escapeHtml(entry.player_name) + '</span>'
-                + '<span class="lb-guesses">' + words + '</span>'
-                + '<span class="lb-time">' + escapeHtml(entry.elapsed_formatted) + '</span>'
-                + '</div>';
-        }).join('');
+        list.replaceChildren.apply(
+            list,
+            data.entries.map(function (entry, index) {
+                return buildLeaderboardRow(entry, index);
+            })
+        );
         if (currentPanel === 2) startLeaderboardScroll();  // re-arm for new content
     }
 

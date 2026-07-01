@@ -1,7 +1,5 @@
 # ABOUTME: View layer for the game UI — Jinja context building, board/screen
 # ABOUTME: render helpers, keyboard-state, and friendly error text.
-from typing import Any
-
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -120,7 +118,7 @@ def game_context(
     status_message: str = "",
     animate: bool = False,
     auto_share_after_reveal: bool = False,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Build the Jinja2 context dict for game-screen and board-partial templates.
 
     :param request: The incoming HTTP request.
@@ -192,7 +190,7 @@ def render_full_page(
     :returns: Rendered HTML response.
     """
     if game_state is None:
-        context: dict[str, Any] = {
+        context: dict[str, object] = {
             "request": request,
             "screen_state": "start",
             "current_screen_template": "_start_screen.html",

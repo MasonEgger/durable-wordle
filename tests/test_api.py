@@ -2,6 +2,7 @@
 # game board rendering, health check, and Temporal workflow integration.
 import asyncio
 import concurrent.futures
+import json
 import pathlib
 import uuid
 
@@ -154,6 +155,33 @@ class TestGuessEndpoint:
                     assert response.status_code == 200
                     body = response.text
                     assert "error-message" in body or "not a valid word" in body.lower()
+
+    async def test_htmx_invalid_guess_returns_trigger_without_board_swap(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """HTMX invalid guesses should fail fast and unlock the client UI."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=[calculate_feedback, select_word, validate_guess],
+                activity_executor=executor,
+            ):
+                async with _make_client(workflow_environment, task_queue) as client:
+                    await client.post("/play")
+
+                    response = await client.post(
+                        "/guess",
+                        data={"guess": "ZZZZZ"},
+                        headers={"HX-Request": "true"},
+                    )
+
+                    assert response.status_code == 422
+                    assert response.text == ""
+                    assert json.loads(response.headers["HX-Trigger"]) == {
+                        "guessError": "Not in word list"
+                    }
 
     async def test_workflow_id_uses_game_id(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
@@ -625,11 +653,12 @@ class TestDisplayEndpoints:
         assert "--circle-safe-w: calc(var(--circle-w) * 0.68)" in display_css
         assert "--circle-text-w: calc(var(--circle-w) * 0.58)" in display_css
         assert (
-            "clip-path: circle(calc(var(--circle-w) * 0.5) at 50% 50%)"
-            in display_css
+            "clip-path: circle(calc(var(--circle-w) * 0.5) at 50% 50%)" in display_css
         )
         assert "max-width: var(--circle-text-w)" in display_css
         assert "width: var(--circle-safe-w)" in display_css
+        assert "--timeline-max-h: calc(var(--circle-safe-h) * 0.68)" in display_css
+        assert "max-height: var(--timeline-max-h)" in display_css
 
     def test_display_leaderboard_scroll_reaches_bottom_quickly(self) -> None:
         """Leaderboard display should show the bottom rows before rotating away."""
@@ -648,16 +677,14 @@ class TestDisplayEndpoints:
         display_js = pathlib.Path("static/display.js").read_text()
 
         assert (
-            "var TIMELINE_CACHE_KEY = 'durable-wordle:first-timeline-svg'"
-            in display_js
+            "var TIMELINE_CACHE_KEY = 'durable-wordle:first-timeline-svg'" in display_js
         )
         assert "function cacheFirstTimelineSvg(svg)" in display_js
         assert "window.sessionStorage.setItem(TIMELINE_CACHE_KEY" in display_js
         assert "function buildTimelinePlaceholder()" in display_js
         assert (
             "document.getElementById('timeline-box').replaceChildren("
-            "buildTimelinePlaceholder())"
-            in display_js
+            "buildTimelinePlaceholder())" in display_js
         )
         assert "cacheFirstTimelineSvg(clone)" in display_js
 

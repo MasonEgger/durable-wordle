@@ -20,6 +20,7 @@
     --circle-safe-w: calc(var(--circle-w) * 0.68);
     --circle-safe-h: calc(var(--circle-w) * 0.68);
     --circle-text-w: calc(var(--circle-w) * 0.58);
+    --timeline-max-h: calc(var(--circle-safe-h) * 0.68);
     --shift-x: 0px;
     --shift-y: 0px;
 }
@@ -367,7 +368,7 @@ body {
 #timeline-caption {
     width: 100%;
     max-width: var(--circle-text-w);
-    min-height: 2.6em;
+    min-height: 2.8em;
     padding: 0;
     display: flex;
     align-items: center;
@@ -397,7 +398,7 @@ body {
 #timeline-box {
     width: 100%;
     max-width: var(--circle-safe-w);
-    max-height: calc(var(--circle-safe-h) * 0.58);
+    max-height: var(--timeline-max-h);
     padding: 0.5rem;
     display: flex;
     align-items: center;

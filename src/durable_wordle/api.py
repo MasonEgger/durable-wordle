@@ -8,7 +8,6 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, Request
@@ -227,7 +226,7 @@ def create_app(
 
     def _share_context(
         request: Request, game_state: GameState | None
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         guesses = game_state.guesses if game_state else []
         elapsed_seconds = 0
         if game_state and game_state.started_at:
@@ -492,7 +491,7 @@ def create_app(
         response.set_cookie(key="game_id", value=game_id, httponly=True)
         return response
 
-    def _leaderboard_context(request: Request) -> dict[str, Any]:
+    def _leaderboard_context(request: Request) -> dict[str, object]:
         today = _today_la()
         entries = get_top_entries_for_date(today)
         madlibs = get_madlib_pairs(entries)
@@ -574,7 +573,7 @@ def create_app(
             game_state,
         )
 
-    def _leaderboard_payload(game_date: str) -> dict[str, Any]:
+    def _leaderboard_payload(game_date: str) -> dict[str, object]:
         """Build the JSON leaderboard payload for the display.
 
         :param game_date: Booth-local ISO date string.
@@ -594,7 +593,7 @@ def create_app(
             "madlibs": get_madlib_pairs(entries),
         }
 
-    def _recent_win_payload(game_date: str) -> dict[str, Any] | None:
+    def _recent_win_payload(game_date: str) -> dict[str, object] | None:
         """Build the fresh-win payload for the display.
 
         :param game_date: Booth-local ISO date string.
@@ -640,7 +639,7 @@ def create_app(
         )
         return {"workflow_id": newest.id, "run_id": newest.run_id}
 
-    async def _recent_loss_payload(client: Client) -> dict[str, Any] | None:
+    async def _recent_loss_payload(client: Client) -> dict[str, object] | None:
         """Return the most recently closed reveal-worthy game.
 
         Losses and inactivity timeouts are not stored in SQLite, so the display
@@ -682,7 +681,7 @@ def create_app(
         return None
 
     @app.get("/api/leaderboard")
-    async def api_leaderboard(request: Request) -> dict[str, Any]:
+    async def api_leaderboard(request: Request) -> dict[str, object]:
         """Return today's leaderboard as JSON for the live-updating display.
 
         :param request: The incoming HTTP request.
@@ -692,7 +691,7 @@ def create_app(
         return _leaderboard_payload(_today_la())
 
     @app.get("/api/last-win")
-    async def last_win(request: Request) -> dict[str, Any]:
+    async def last_win(request: Request) -> dict[str, object]:
         """Return the most recent winning entry within the last few seconds.
 
         The display polls this to fire a one-off win celebration. Returns
@@ -716,7 +715,7 @@ def create_app(
         return await _active_game_payload(client)
 
     @app.get("/api/display-state")
-    async def display_state(request: Request) -> dict[str, Any]:
+    async def display_state(request: Request) -> dict[str, object]:
         """Return all display data in one polling response.
 
         This keeps the second-screen booth display from issuing separate

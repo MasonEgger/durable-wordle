@@ -27,6 +27,37 @@
     </main>
 
     <script>
+    // ── Timing constants ───────────────────────────────────────────────────────
+    var TILE_FLIP_MS = 300;      // delay between consecutive tile flips
+    var TILE_COLOR_OFFSET = 250; // ms into a flip when the color swaps (mid-flip)
+    var SHAKE_DURATION_MS = 500; // shake animation duration
+    var ERROR_DISMISS_MS = 2000; // auto-dismiss for error overlays
+    var MADLIB_CYCLE_MS = 3000;  // interval between madlib phrase swaps
+    var MADLIB_FADE_MS = 300;    // fade-out duration before swapping text
+    var AUTO_SHARE_AFTER_REVEAL_MS = 350; // pause after final tile before selfie
+    var INACTIVITY_SECONDS = 60;
+    var START_IDLE_DELAY_MS = 10000; // start-screen attract animation delay
+    var IDLE_DEMO_TYPE_MS = 120;
+    var IDLE_DEMO_ROW_MS = 2200;
+    var IDLE_DEMO_REVEAL_AFTER_MS = 760;
+    var IDLE_DEMO_RESTART_PAUSE_MS = 1800;
+    var MAX_LENGTH = 5;
+    var IDLE_DEMO_SEQUENCES = [
+        { target: 'PLANT', guesses: ['CRANE', 'SLANT', 'PLANT'] },
+        { target: 'BRAVE', guesses: ['STONE', 'CRANE', 'GRAPE', 'BRAVE'] },
+        { target: 'CHIME', guesses: ['ABOUT', 'CLING', 'CHIDE', 'CHIME'] },
+        { target: 'TIMER', guesses: ['CRANE', 'BLUSH', 'MIGHT', 'TILER', 'TIMER'] },
+        {
+            target: 'SPARK',
+            guesses: ['TRACE', 'SHOUT', 'SCARY', 'SNARK', 'SPARE', 'SPARK']
+        }
+    ];
+    var IDLE_DEMO_FEEDBACK_CLASS = {
+        correct: 'bg-green-500 border-green-500',
+        present: 'bg-amber-500 border-amber-500',
+        absent: 'bg-wordle-absent border-wordle-absent'
+    };
+
     // ── Header color + title text ──────────────────────────────────────────────
     function updateHeaderColor(toScreen) {
         var title = document.getElementById('main-title');
@@ -115,7 +146,6 @@
     }
 
     // ── Inactivity countdown (mirrors the workflow's 60s timeout) ────────────────
-    var INACTIVITY_SECONDS = 60;
     var countdownInterval = null;
     var countdownEnd = 0;
     var countdownTimedOut = false;
@@ -210,20 +240,16 @@
         initMadlibCycle();
     }
 
-    // ── Timing constants ───────────────────────────────────────────────────────
-    var TILE_FLIP_MS = 300;      // delay between consecutive tile flips
-    var TILE_COLOR_OFFSET = 250; // ms into a flip when the color swaps (mid-flip)
-    var SHAKE_DURATION_MS = 500; // shake animation duration
-    var ERROR_DISMISS_MS = 2000; // auto-dismiss for error overlays
-    var MADLIB_CYCLE_MS = 3000;  // interval between madlib phrase swaps
-    var MADLIB_FADE_MS = 300;    // fade-out duration before swapping text
-    var AUTO_SHARE_AFTER_REVEAL_MS = 350; // pause after final tile before selfie
-
     // ── Keyboard input ─────────────────────────────────────────────────────────
     var currentGuess = '';
     var guessInFlight = false;
     var startInFlight = false;
-    var MAX_LENGTH = 5;
+    var startIdleTimer = null;
+    var startIdleDemoVisible = false;
+    var startIdleDemoAnimationTimer = null;
+    var startIdleDemoTimeouts = [];
+    var startIdleDemoSequenceOrder = [];
+    var startIdleDemoLastSequenceIndex = -1;
 
     function getCurrentTiles() {
         return document.querySelectorAll('.current-tile');
@@ -296,6 +322,8 @@
         if (startInFlight) return;
         if (!form.reportValidity()) return;
 
+        stopStartIdleDemo();
+
         var values = {};
         new FormData(form).forEach(function(value, key) {
             values[key] = value;
@@ -315,12 +343,241 @@
         });
     }
 
+    function getStartScreen() {
+        return document.getElementById('start-screen');
+    }
+
+    function setStartIdleDemoVisible(nextValue) {
+        var screen = getStartScreen();
+        startIdleDemoVisible = nextValue;
+        if (!screen) return;
+        screen.classList.toggle('start-screen--idle-demo', nextValue);
+        screen.setAttribute('data-idle-demo-visible', nextValue ? 'true' : 'false');
+        if (nextValue) startStartIdleDemoAnimation();
+        else stopStartIdleDemoAnimation();
+    }
+
+    function stopStartIdleTimer() {
+        if (startIdleTimer) {
+            clearTimeout(startIdleTimer);
+            startIdleTimer = null;
+        }
+    }
+
+    function stopStartIdleDemo() {
+        stopStartIdleTimer();
+        setStartIdleDemoVisible(false);
+    }
+
+    function scheduleStartIdleDemo() {
+        stopStartIdleTimer();
+        if (!getStartScreen()) {
+            setStartIdleDemoVisible(false);
+            return;
+        }
+        startIdleTimer = setTimeout(function() {
+            if (!getStartScreen()) return;
+            setStartIdleDemoVisible(true);
+        }, START_IDLE_DELAY_MS);
+    }
+
+    function initStartIdleDemo() {
+        setStartIdleDemoVisible(false);
+        scheduleStartIdleDemo();
+    }
+
+    function focusFirstStartInput() {
+        var firstInput = document.querySelector('#start-form input[name="first_name"]');
+        if (firstInput) firstInput.focus();
+    }
+
+    function clearStartIdleDemoTimeouts() {
+        startIdleDemoTimeouts.forEach(function(timeoutId) {
+            clearTimeout(timeoutId);
+        });
+        startIdleDemoTimeouts = [];
+        if (startIdleDemoAnimationTimer) {
+            clearTimeout(startIdleDemoAnimationTimer);
+            startIdleDemoAnimationTimer = null;
+        }
+    }
+
+    function scheduleStartIdleDemoAnimation(callback, delayMs) {
+        var timeoutId = setTimeout(callback, delayMs);
+        startIdleDemoTimeouts.push(timeoutId);
+    }
+
+    function resetStartIdleDemoBoard() {
+        document.querySelectorAll('#start-idle-demo .wordle-tile').forEach(function(tile) {
+            tile.textContent = '';
+            tile.removeAttribute('data-demo-letter');
+            tile.removeAttribute('data-color');
+            tile.classList.remove(
+                'tile-pop',
+                'tile-reveal',
+                'current-tile',
+                'border-wordle-tile-active',
+                'bg-green-500',
+                'border-green-500',
+                'bg-amber-500',
+                'border-amber-500',
+                'bg-wordle-absent',
+                'border-wordle-absent'
+            );
+            tile.classList.add('border-wordle-tile-empty', 'bg-transparent');
+        });
+    }
+
+    function calculateStartIdleDemoFeedback(guess, target) {
+        var feedback = new Array(MAX_LENGTH).fill('absent');
+        var remainingLetters = {};
+
+        for (var letterIndex = 0; letterIndex < MAX_LENGTH; letterIndex++) {
+            if (guess[letterIndex] === target[letterIndex]) {
+                feedback[letterIndex] = 'correct';
+            } else {
+                var targetLetter = target[letterIndex];
+                remainingLetters[targetLetter] = (remainingLetters[targetLetter] || 0) + 1;
+            }
+        }
+
+        for (var checkIndex = 0; checkIndex < MAX_LENGTH; checkIndex++) {
+            if (feedback[checkIndex] === 'correct') continue;
+            var guessLetter = guess[checkIndex];
+            if (remainingLetters[guessLetter] > 0) {
+                feedback[checkIndex] = 'present';
+                remainingLetters[guessLetter]--;
+            }
+        }
+
+        return feedback;
+    }
+
+    function shuffleStartIdleDemoSequenceOrder() {
+        var order = IDLE_DEMO_SEQUENCES.map(function(_, sequenceIndex) {
+            return sequenceIndex;
+        });
+        for (var orderIndex = order.length - 1; orderIndex > 0; orderIndex--) {
+            var swapIndex = Math.floor(Math.random() * (orderIndex + 1));
+            var currentValue = order[orderIndex];
+            order[orderIndex] = order[swapIndex];
+            order[swapIndex] = currentValue;
+        }
+        if (order.length > 1 && order[0] === startIdleDemoLastSequenceIndex) {
+            var firstValue = order[0];
+            order[0] = order[1];
+            order[1] = firstValue;
+        }
+        startIdleDemoSequenceOrder = order;
+    }
+
+    function nextStartIdleDemoSequence() {
+        if (!startIdleDemoSequenceOrder.length) {
+            shuffleStartIdleDemoSequenceOrder();
+        }
+        var sequenceIndex = startIdleDemoSequenceOrder.shift();
+        startIdleDemoLastSequenceIndex = sequenceIndex;
+        return IDLE_DEMO_SEQUENCES[sequenceIndex];
+    }
+
+    function buildStartIdleDemoPuzzle() {
+        var sequence = nextStartIdleDemoSequence();
+        var rows = sequence.guesses.map(function(guess) {
+            return {
+                guess: guess,
+                feedback: calculateStartIdleDemoFeedback(guess, sequence.target)
+            };
+        });
+
+        return { target: sequence.target, rows: rows };
+    }
+
+    function setStartIdleDemoRow(row, demoRow) {
+        row.querySelectorAll('[data-demo-cell]').forEach(function(tile, tileIndex) {
+            tile.dataset.demoLetter = demoRow.guess[tileIndex];
+            tile.dataset.color = IDLE_DEMO_FEEDBACK_CLASS[demoRow.feedback[tileIndex]];
+            tile.setAttribute('aria-label', demoRow.guess[tileIndex] + ', ' + demoRow.feedback[tileIndex]);
+        });
+    }
+
+    function typeStartIdleDemoRow(row) {
+        row.querySelectorAll('[data-demo-cell]').forEach(function(tile, tileIndex) {
+            scheduleStartIdleDemoAnimation(function() {
+                tile.textContent = tile.dataset.demoLetter || '';
+                tile.classList.remove('border-wordle-tile-empty', 'bg-transparent');
+                tile.classList.add('current-tile', 'border-wordle-tile-active', 'tile-pop');
+                setTimeout(function() { tile.classList.remove('tile-pop'); }, 120);
+            }, tileIndex * IDLE_DEMO_TYPE_MS);
+        });
+    }
+
+    function revealStartIdleDemoRow(row) {
+        row.querySelectorAll('[data-demo-cell][data-demo-letter]').forEach(function(tile) {
+            tile.classList.remove('current-tile', 'border-wordle-tile-active');
+            tile.classList.add('border-wordle-tile-empty', 'bg-transparent');
+            tile.classList.remove('tile-reveal');
+            void tile.offsetWidth;
+            tile.classList.add('tile-reveal');
+
+            var colorClass = tile.dataset.color || '';
+            var delayMs = getAnimationDelayMs(tile);
+            scheduleStartIdleDemoAnimation(function() {
+                tile.classList.remove('border-wordle-tile-empty', 'bg-transparent');
+                colorClass.split(' ').forEach(function(cls) {
+                    if (cls) tile.classList.add(cls);
+                });
+            }, delayMs + TILE_COLOR_OFFSET);
+        });
+    }
+
+    function runStartIdleDemoAnimation() {
+        clearStartIdleDemoTimeouts();
+        resetStartIdleDemoBoard();
+        var puzzle = buildStartIdleDemoPuzzle();
+        var rows = Array.prototype.slice.call(document.querySelectorAll('#start-idle-demo .guess-row'));
+        puzzle.rows.forEach(function(demoRow, rowIndex) {
+            var row = rows[rowIndex];
+            if (!row) return;
+            setStartIdleDemoRow(row, demoRow);
+            var rowDelayMs = rowIndex * IDLE_DEMO_ROW_MS;
+            scheduleStartIdleDemoAnimation(function() { typeStartIdleDemoRow(row); }, rowDelayMs);
+            scheduleStartIdleDemoAnimation(function() { revealStartIdleDemoRow(row); }, rowDelayMs + IDLE_DEMO_REVEAL_AFTER_MS);
+        });
+        startIdleDemoAnimationTimer = setTimeout(
+            runStartIdleDemoAnimation,
+            puzzle.rows.length * IDLE_DEMO_ROW_MS + IDLE_DEMO_RESTART_PAUSE_MS
+        );
+    }
+
+    function startStartIdleDemoAnimation() {
+        clearStartIdleDemoTimeouts();
+        runStartIdleDemoAnimation();
+    }
+
+    function stopStartIdleDemoAnimation() {
+        clearStartIdleDemoTimeouts();
+        resetStartIdleDemoBoard();
+    }
+
     document.addEventListener('submit', function(event) {
         var form = event.target.closest('#start-form');
         if (!form) return;
         event.preventDefault();
         event.stopPropagation();
         submitStartForm(form);
+    }, true);
+
+    document.addEventListener('keydown', function(event) {
+        if (!getStartScreen()) return;
+        if (startIdleDemoVisible) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            setStartIdleDemoVisible(false);
+            scheduleStartIdleDemo();
+            focusFirstStartInput();
+            return;
+        }
+        scheduleStartIdleDemo();
     }, true);
 
     function getAnimationDelayMs(element) {
@@ -384,15 +641,19 @@
             countdownTimedOut = false;
             stopTimer();
             if (document.getElementById('game-screen')) {
+                stopStartIdleDemo();
                 updateHeaderColor('game');
                 initTimerFromScreen();
                 startCountdown();
             } else if (document.getElementById('start-screen')) {
                 updateHeaderColor('start');
+                initStartIdleDemo();
             } else if (document.getElementById('leaderboard-screen')) {
+                stopStartIdleDemo();
                 updateHeaderColor('leaderboard');
                 initMadlibCycle();
             } else if (document.getElementById('share-screen')) {
+                stopStartIdleDemo();
                 stopCountdown();
                 updateHeaderColor('start');
             }
@@ -466,9 +727,20 @@
         }
     });
 
-    document.body.addEventListener('guessError', function(event) {
+    function isGuessRequestEvent(event) {
+        var detail = event.detail || {};
+        if (detail.pathInfo && detail.pathInfo.requestPath === '/guess') return true;
+        if (detail.requestConfig && detail.requestConfig.path === '/guess') return true;
+        if (!detail.xhr || !detail.xhr.responseURL) return false;
+        try {
+            return new URL(detail.xhr.responseURL).pathname === '/guess';
+        } catch(e) {
+            return detail.xhr.responseURL.indexOf('/guess') >= 0;
+        }
+    }
+
+    function showGuessError(message) {
         setGuessInFlight(false);
-        var message = event.detail.value;
 
         var row = document.getElementById('current-row');
         if (row) {
@@ -485,19 +757,39 @@
         toast.textContent = message;
         document.body.appendChild(toast);
         setTimeout(function() { toast.remove(); }, ERROR_DISMISS_MS);
+    }
+
+    function guessErrorFromTriggerHeader(xhr) {
+        if (!xhr) return '';
+        var triggerHeader = xhr.getResponseHeader('HX-Trigger') || '';
+        if (!triggerHeader) return '';
+        try {
+            var triggers = JSON.parse(triggerHeader);
+            return triggers.guessError || '';
+        } catch(e) {
+            return '';
+        }
+    }
+
+    document.body.addEventListener('guessError', function(event) {
+        showGuessError(event.detail.value || 'Something went wrong — try again');
     });
 
     document.body.addEventListener('htmx:responseError', function(event) {
-        if (event.detail && event.detail.pathInfo && event.detail.pathInfo.requestPath === '/guess') {
-            setGuessInFlight(false);
+        if (isGuessRequestEvent(event)) {
+            showGuessError(
+                guessErrorFromTriggerHeader(event.detail.xhr) || 'Something went wrong — try again'
+            );
         }
     });
 
     document.body.addEventListener('htmx:sendError', function(event) {
-        if (event.detail && event.detail.pathInfo && event.detail.pathInfo.requestPath === '/guess') {
-            setGuessInFlight(false);
+        if (isGuessRequestEvent(event)) {
+            showGuessError('Something went wrong — try again');
         }
     });
+
+    initStartIdleDemo();
     </script>
 </body>
 </html>

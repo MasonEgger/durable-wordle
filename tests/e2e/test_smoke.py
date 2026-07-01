@@ -32,6 +32,31 @@ def test_start_screen_renders(live_server: str, page: Page) -> None:
     expect(page.locator("input[name='first_name']")).to_be_visible()
 
 
+def test_start_screen_idle_demo_returns_to_form(live_server: str, page: Page) -> None:
+    """The start-screen attract animation exits on the next physical key."""
+    page.goto(f"{live_server}/")
+    page.evaluate("stopStartIdleDemo(); START_IDLE_DELAY_MS = 50; initStartIdleDemo();")
+
+    expect(page.locator("#start-idle-demo")).to_be_visible(timeout=2000)
+    expect(page.locator("#start-idle-demo .wordle-demo__title")).to_have_text(
+        "How to play"
+    )
+    expect(page.locator("#start-idle-demo #game-board .wordle-tile")).to_have_count(30)
+    expect(page.locator("#start-idle-demo #game-board .guess-row")).to_have_count(6)
+    expect(page.locator("#start-idle-demo .tile-reveal").first).to_be_visible(
+        timeout=2500
+    )
+    expect(page.locator("#start-idle-demo .bg-wordle-absent").first).to_be_visible(
+        timeout=2500
+    )
+    page.keyboard.press("A")
+
+    expect(page.locator("#start-idle-demo")).to_be_hidden()
+    expect(page.locator("#start-form")).to_be_visible()
+    expect(page.locator("input[name='first_name']")).to_be_focused()
+    assert page.locator("input[name='first_name']").input_value() == ""
+
+
 def test_play_via_click_starts_game(live_server: str, page: Page) -> None:
     """Clicking PLAY starts the game from the initial page load."""
     page.goto(f"{live_server}/")
