@@ -93,10 +93,14 @@ class UserSessionWorkflow:
             workflow_input.game_mode.value,
         )
         inactivity_timeout = INACTIVITY_TIMEOUT
+        has_inactivity_timeout = True
         if workflow_input.inactivity_timeout_seconds is not None:
-            inactivity_timeout = timedelta(
-                seconds=workflow_input.inactivity_timeout_seconds
-            )
+            if workflow_input.inactivity_timeout_seconds <= 0:
+                has_inactivity_timeout = False
+            else:
+                inactivity_timeout = timedelta(
+                    seconds=workflow_input.inactivity_timeout_seconds
+                )
 
         # Wait for the game to end, resetting an inactivity timer on each guess.
         # If no guess arrives within INACTIVITY_TIMEOUT, abandon the game so the
@@ -108,10 +112,13 @@ class UserSessionWorkflow:
                 return self._state.is_game_over or len(self._state.guesses) != before
 
             try:
-                await workflow.wait_condition(
-                    _activity_or_game_over,
-                    timeout=inactivity_timeout,
-                )
+                if has_inactivity_timeout:
+                    await workflow.wait_condition(
+                        _activity_or_game_over,
+                        timeout=inactivity_timeout,
+                    )
+                else:
+                    await workflow.wait_condition(_activity_or_game_over)
             except TimeoutError:
                 self._state.status = "abandoned"
                 workflow.logger.info(

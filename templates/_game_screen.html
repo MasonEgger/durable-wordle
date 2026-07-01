@@ -1,5 +1,6 @@
 <div id="game-screen" class="screen-enter">
 
+    {% if show_game_timers %}
     <input type="hidden" id="started-at-ts" value="{{ started_at_ts }}">
 
     <div class="game-timers" aria-live="off">
@@ -18,6 +19,7 @@
             <span id="countdown-value" class="timer-value">1:00</span>
         </div>
     </div>
+    {% endif %}
 
     <div id="game-content">
         {% include "_board_partial.html" %}

@@ -261,6 +261,8 @@ class TestTemplateRendering:
         assert response.status_code == 200
         assert 'id="start-screen"' not in body
         assert "game-board" in body
+        assert "game-timers" not in body
+        assert "countdown-card" not in body
         assert 'value="daily"' in body
         assert 'value="random"' in body
         assert 'value="absurdle"' in body

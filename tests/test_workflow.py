@@ -2,6 +2,7 @@
 # valid/invalid guesses, win/loss conditions, and post-game rejection.
 import concurrent.futures
 import uuid
+from datetime import timedelta
 
 import pytest
 from temporalio.client import WorkflowFailureError, WorkflowUpdateFailedError
@@ -358,3 +359,33 @@ class TestInactivityTimeout:
                     final_state = await handle.result()
                     assert final_state.status == "abandoned"
                     assert len(final_state.guesses) == 0
+
+    async def test_zero_inactivity_timeout_keeps_game_running(self) -> None:
+        """A zero timeout should preserve the original untimed classic flow."""
+        async with await WorkflowEnvironment.start_time_skipping() as env:
+            task_queue = f"untimed-{uuid.uuid4()}"
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                async with Worker(
+                    env.client,
+                    task_queue=task_queue,
+                    workflows=[UserSessionWorkflow],
+                    activities=WORKFLOW_ACTIVITIES,
+                    activity_executor=executor,
+                ):
+                    handle = await env.client.start_workflow(
+                        UserSessionWorkflow.run,
+                        WorkflowInput(
+                            session_id="untimed-session",
+                            inactivity_timeout_seconds=0,
+                        ),
+                        id=str(uuid.uuid4()),
+                        task_queue=task_queue,
+                    )
+
+                    await env.sleep(timedelta(seconds=120))
+
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+                    assert state.status == "playing"
+                    assert len(state.guesses) == 0
+
+                    await handle.terminate("test cleanup")

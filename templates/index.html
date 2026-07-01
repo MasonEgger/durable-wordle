@@ -194,6 +194,7 @@
     function startCountdown() {
         stopCountdown();
         var area = document.getElementById('countdown-area');
+        if (!area) return;
         if (countdownTimedOut) {
             showCountdownZero();
             return;

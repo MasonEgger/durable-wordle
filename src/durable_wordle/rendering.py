@@ -132,6 +132,8 @@ def game_context(
     """
     guesses = game_state.guesses if game_state else []
     status = game_state.status if game_state else "playing"
+    app_mode = getattr(request.app.state, "app_mode", "")
+    show_game_timers = app_mode != "classic"
     selected_game_mode = game_state.game_mode if game_state else GameMode.RANDOM
     show_game_mode_selector = (
         bool(getattr(request.app.state, "show_game_mode_selector", False))
@@ -173,6 +175,7 @@ def game_context(
         "game_modes": list(GameMode),
         "selected_game_mode": selected_game_mode,
         "show_game_mode_selector": show_game_mode_selector,
+        "show_game_timers": show_game_timers,
         "animate": animate,
         "auto_share_after_reveal": auto_share_after_reveal,
         "started_at_ts": started_at_ts,

@@ -213,6 +213,7 @@ async def _get_or_start_workflow(
     task_queue: str,
     game_mode: GameMode = GameMode.RANDOM,
     game_date: str = "",
+    inactivity_timeout_seconds: float | None = None,
 ) -> WorkflowHandle[UserSessionWorkflow, GameState]:
     """Get an existing workflow handle or start a new workflow.
 
@@ -222,6 +223,7 @@ async def _get_or_start_workflow(
     :param task_queue: The task queue for the worker.
     :param game_mode: Selected game mode.
     :param game_date: ISO date used by daily mode.
+    :param inactivity_timeout_seconds: Optional inactivity timeout override.
     :returns: A workflow handle.
     """
     try:
@@ -241,6 +243,7 @@ async def _get_or_start_workflow(
             session_id=session_id,
             game_mode=game_mode,
             game_date=game_date,
+            inactivity_timeout_seconds=inactivity_timeout_seconds,
         ),
         id=workflow_id,
         task_queue=task_queue,
@@ -327,6 +330,19 @@ def create_app(
     if normalized_app_mode == APP_MODE_BOOTH:
         app.include_router(proxy_router)  # /temporal-ui/* + /api/v1/* → Temporal UI
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+    def _workflow_inactivity_timeout() -> float | None:
+        """Return the workflow inactivity timeout for this app mode.
+
+        Classic mode matches the original untimed Wordle experience. Booth mode
+        keeps the timeout so the second-screen display can return to attract
+        mode after abandoned games.
+
+        :returns: ``0`` to disable timeout, or ``None`` for workflow default.
+        """
+        if normalized_app_mode == APP_MODE_CLASSIC:
+            return 0
+        return None
 
     def _share_context(
         request: Request, game_state: GameState | None
@@ -503,6 +519,7 @@ def create_app(
             queue,
             game_mode=selected_game_mode,
             game_date=_today_la(),
+            inactivity_timeout_seconds=_workflow_inactivity_timeout(),
         )
         game_state = await _wait_for_game_state(handle)
 
@@ -589,6 +606,7 @@ def create_app(
             queue,
             game_mode=selected_game_mode,
             game_date=_today_la(),
+            inactivity_timeout_seconds=_workflow_inactivity_timeout(),
         )
 
         # Send guess via Update
