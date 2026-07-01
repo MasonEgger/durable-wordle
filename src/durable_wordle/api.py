@@ -23,20 +23,21 @@ from temporalio.client import (
 )
 from temporalio.service import RPCError
 
-from durable_wordle.leaderboard import add_entry as lb_add_entry
-from durable_wordle.leaderboard import (
+from durable_wordle.booth.leaderboard import add_entry as lb_add_entry
+from durable_wordle.booth.leaderboard import (
     format_elapsed,
     get_madlib_pairs,
     get_recent_win,
     get_top_entries_for_date,
     record_participant,
 )
+from durable_wordle.booth.proxy import proxy_router
 from durable_wordle.models import (
+    GameMode,
     GameState,
     MakeGuessInput,
     WorkflowInput,
 )
-from durable_wordle.proxy import proxy_router
 from durable_wordle.rendering import (
     SHARE_EMOJI,
     TILE_FEEDBACK_CSS,
@@ -97,14 +98,64 @@ def _configure_access_log_filters() -> None:
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 STATIC_DIR = PROJECT_ROOT / "static"
+APP_MODE_CLASSIC = "classic"
+APP_MODE_BOOTH = "booth"
 
 
-def get_workflow_id(game_id: str) -> str:
+def _normalized_app_mode(raw_mode: str | None) -> str:
+    """Normalize the runtime app mode.
+
+    :param raw_mode: Raw mode value from configuration.
+    :returns: ``"classic"`` or ``"booth"``.
+    """
+    if raw_mode == APP_MODE_CLASSIC:
+        return APP_MODE_CLASSIC
+    return APP_MODE_BOOTH
+
+
+def _game_mode_from_value(raw_mode: str | None) -> GameMode:
+    """Parse a submitted or cookie-backed game mode.
+
+    :param raw_mode: Raw game mode string.
+    :returns: Parsed game mode, defaulting to random.
+    """
+    if raw_mode in {mode.value for mode in GameMode}:
+        return GameMode(raw_mode)
+    return GameMode.RANDOM
+
+
+def _game_mode_from_request(
+    request: Request,
+    submitted_mode: str | None = None,
+) -> GameMode:
+    """Resolve the active game mode from form data or cookies.
+
+    :param request: The incoming HTTP request.
+    :param submitted_mode: Optional form-submitted game mode.
+    :returns: The selected game mode.
+    """
+    return _game_mode_from_value(submitted_mode or request.cookies.get("game_mode"))
+
+
+def get_workflow_id(
+    game_id: str,
+    *,
+    session_id: str = "",
+    game_date: str = "",
+    game_mode: GameMode = GameMode.RANDOM,
+) -> str:
     """Build a workflow ID from a game identifier.
 
     :param game_id: Unique game identifier (UUID).
+    :param session_id: Browser session ID used by daily games.
+    :param game_date: ISO date string used by daily games.
+    :param game_mode: Selected game mode.
     :returns: A workflow ID string.
     """
+    if game_mode is GameMode.DAILY:
+        return f"wordle-{game_date}-{session_id or game_id}"
+    if game_mode is GameMode.ABSURDLE:
+        return f"wordle-absurdle-{game_id}"
     return f"wordle-random-{game_id}"
 
 
@@ -160,6 +211,8 @@ async def _get_or_start_workflow(
     workflow_id: str,
     session_id: str,
     task_queue: str,
+    game_mode: GameMode = GameMode.RANDOM,
+    game_date: str = "",
 ) -> WorkflowHandle[UserSessionWorkflow, GameState]:
     """Get an existing workflow handle or start a new workflow.
 
@@ -167,6 +220,8 @@ async def _get_or_start_workflow(
     :param workflow_id: The workflow ID.
     :param session_id: The session ID.
     :param task_queue: The task queue for the worker.
+    :param game_mode: Selected game mode.
+    :param game_date: ISO date used by daily mode.
     :returns: A workflow handle.
     """
     try:
@@ -182,7 +237,11 @@ async def _get_or_start_workflow(
 
     return await client.start_workflow(
         UserSessionWorkflow.run,
-        WorkflowInput(session_id=session_id),
+        WorkflowInput(
+            session_id=session_id,
+            game_mode=game_mode,
+            game_date=game_date,
+        ),
         id=workflow_id,
         task_queue=task_queue,
     )
@@ -231,6 +290,8 @@ def create_app(
     temporal_namespace: str = "default",
     task_queue: str = "wordle-tasks",
     temporal_client: Client | None = None,
+    app_mode: str = APP_MODE_BOOTH,
+    show_booth_mode_toggle: bool = False,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -238,9 +299,12 @@ def create_app(
     :param temporal_namespace: Temporal namespace to use.
     :param task_queue: Task queue for the Temporal worker.
     :param temporal_client: Optional pre-connected Temporal client (for testing).
+    :param app_mode: Runtime mode, either ``"classic"`` or ``"booth"``.
+    :param show_booth_mode_toggle: Whether booth start form exposes game modes.
     :returns: A configured FastAPI application instance.
     """
     _configure_access_log_filters()
+    normalized_app_mode = _normalized_app_mode(app_mode)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -255,8 +319,13 @@ def create_app(
         yield
 
     app = FastAPI(title="Durable Wordle", lifespan=lifespan)
+    app.state.app_mode = normalized_app_mode
+    app.state.show_game_mode_selector = (
+        normalized_app_mode == APP_MODE_CLASSIC or show_booth_mode_toggle
+    )
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-    app.include_router(proxy_router)  # /temporal-ui/* + /api/v1/* → Temporal UI
+    if normalized_app_mode == APP_MODE_BOOTH:
+        app.include_router(proxy_router)  # /temporal-ui/* + /api/v1/* → Temporal UI
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
     def _share_context(
@@ -327,17 +396,29 @@ def create_app(
         """
         response: Response
         if request.headers.get("HX-Request") == "true":
-            response = templates.TemplateResponse(
-                request=request,
-                name="_start_screen.html",
-                context={},
-            )
+            if normalized_app_mode == APP_MODE_CLASSIC:
+                response = render_game_screen(
+                    templates,
+                    request,
+                    session_id=str(uuid.uuid4()),
+                    is_new_session=True,
+                    game_state=GameState(target_word=""),
+                )
+            else:
+                response = templates.TemplateResponse(
+                    request=request,
+                    name="_start_screen.html",
+                    context={
+                        "show_game_mode_selector": app.state.show_game_mode_selector,
+                    },
+                )
             response.headers["HX-Push-Url"] = "/"
         else:
             response = RedirectResponse(url="/", status_code=302)
 
         new_game_id = str(uuid.uuid4())
         response.set_cookie(key="game_id", value=new_game_id, httponly=True)
+        response.delete_cookie(key="game_mode")
         response.delete_cookie(key="session_id")
         return response
 
@@ -355,9 +436,17 @@ def create_app(
 
         client: Client = app.state.temporal_client
         game_state: GameState | None = None
+        game_mode = _game_mode_from_request(request)
         if game_id:
-            workflow_id = get_workflow_id(game_id)
+            workflow_id = get_workflow_id(
+                game_id,
+                session_id=session_id,
+                game_date=_today_la(),
+                game_mode=game_mode,
+            )
             game_state = await _query_existing_game(client, workflow_id)
+        if normalized_app_mode == APP_MODE_CLASSIC and game_state is None:
+            game_state = GameState(target_word="", game_mode=game_mode)
 
         return render_full_page(
             templates,
@@ -375,6 +464,7 @@ def create_app(
         email: str | None = Form(default=None),
         madlib_noun: str | None = Form(default=None),
         madlib_verb: str | None = Form(default=None),
+        game_mode: str | None = Form(default=None),
     ) -> HTMLResponse:
         """Start a new game and return the game screen fragment.
 
@@ -388,6 +478,7 @@ def create_app(
         :param email: Player's email for prize outreach (stored but not displayed).
         :param madlib_noun: The noun for the madlib phrase.
         :param madlib_verb: The past-tense verb for the madlib phrase.
+        :param game_mode: Optional selected Wordle mode.
         :returns: Rendered game screen HTML fragment.
         """
         session_id, is_new_session, game_id = _session_from_request(request)
@@ -398,8 +489,21 @@ def create_app(
         if not game_id:
             game_id = str(uuid.uuid4())
 
-        workflow_id = get_workflow_id(game_id)
-        handle = await _get_or_start_workflow(client, workflow_id, session_id, queue)
+        selected_game_mode = _game_mode_from_request(request, game_mode)
+        workflow_id = get_workflow_id(
+            game_id,
+            session_id=session_id,
+            game_date=_today_la(),
+            game_mode=selected_game_mode,
+        )
+        handle = await _get_or_start_workflow(
+            client,
+            workflow_id,
+            session_id,
+            queue,
+            game_mode=selected_game_mode,
+            game_date=_today_la(),
+        )
         game_state = await _wait_for_game_state(handle)
 
         # Enforce a single running game: terminate any abandoned workflows so the
@@ -414,6 +518,9 @@ def create_app(
             game_state=game_state,
         )
         response.set_cookie(key="game_id", value=game_id, httponly=True)
+        response.set_cookie(
+            key="game_mode", value=selected_game_mode.value, httponly=True
+        )
 
         player_name = " ".join(
             part
@@ -448,6 +555,7 @@ def create_app(
     async def submit_guess(
         request: Request,
         guess: str = Form(...),
+        game_mode: str | None = Form(default=None),
     ) -> HTMLResponse:
         """Process a guess submission.
 
@@ -456,6 +564,7 @@ def create_app(
 
         :param request: The incoming HTTP request.
         :param guess: The guessed word from the form.
+        :param game_mode: Optional selected Wordle mode for a new game.
         :returns: Rendered board partial HTML fragment.
         """
         session_id, is_new_session, game_id = _session_from_request(request)
@@ -466,8 +575,21 @@ def create_app(
         if not game_id:
             game_id = str(uuid.uuid4())
 
-        workflow_id = get_workflow_id(game_id)
-        handle = await _get_or_start_workflow(client, workflow_id, session_id, queue)
+        selected_game_mode = _game_mode_from_request(request, game_mode)
+        workflow_id = get_workflow_id(
+            game_id,
+            session_id=session_id,
+            game_date=_today_la(),
+            game_mode=selected_game_mode,
+        )
+        handle = await _get_or_start_workflow(
+            client,
+            workflow_id,
+            session_id,
+            queue,
+            game_mode=selected_game_mode,
+            game_date=_today_la(),
+        )
 
         # Send guess via Update
         error_message = ""
@@ -524,6 +646,9 @@ def create_app(
             auto_share_after_reveal=is_htmx and game_state.status == "won",
         )
         response.set_cookie(key="game_id", value=game_id, httponly=True)
+        response.set_cookie(
+            key="game_mode", value=selected_game_mode.value, httponly=True
+        )
         return response
 
     def _leaderboard_context(request: Request) -> dict[str, object]:
@@ -574,8 +699,15 @@ def create_app(
         session_id, is_new_session, game_id = _session_from_request(request)
         client: Client = app.state.temporal_client
         game_state = None
+        game_mode = _game_mode_from_request(request)
         if game_id:
-            game_state = await _query_existing_game(client, get_workflow_id(game_id))
+            workflow_id = get_workflow_id(
+                game_id,
+                session_id=session_id,
+                game_date=_today_la(),
+                game_mode=game_mode,
+            )
+            game_state = await _query_existing_game(client, workflow_id)
         if game_state is None:
             return HTMLResponse(content="", status_code=204)
         return render_board_partial(
@@ -598,8 +730,15 @@ def create_app(
         client: Client = app.state.temporal_client
 
         game_state: GameState | None = None
+        game_mode = _game_mode_from_request(request)
         if game_id:
-            game_state = await _query_existing_game(client, get_workflow_id(game_id))
+            workflow_id = get_workflow_id(
+                game_id,
+                session_id=session_id,
+                game_date=_today_la(),
+                game_mode=game_mode,
+            )
+            game_state = await _query_existing_game(client, workflow_id)
 
         return _render_share_screen(
             request,
@@ -761,11 +900,15 @@ def create_app(
         """
         client: Client = request.app.state.temporal_client
         today = _today_la()
+        active_game_payload = await _active_game_payload(client)
+        loss_payload = None
+        if active_game_payload["workflow_id"] is None:
+            loss_payload = await _recent_loss_payload(client)
         return {
-            "active_game": await _active_game_payload(client),
+            "active_game": active_game_payload,
             "leaderboard": _leaderboard_payload(today),
             "win": _recent_win_payload(today),
-            "loss": await _recent_loss_payload(client),
+            "loss": loss_payload,
         }
 
     @app.get("/display", response_class=HTMLResponse)
@@ -783,7 +926,7 @@ def create_app(
         madlibs = get_madlib_pairs(entries)
         return templates.TemplateResponse(
             request=request,
-            name="display.html",
+            name="booth/display.html",
             context={
                 "request": request,
                 "entries": entries,
@@ -810,11 +953,17 @@ def create_production_app() -> FastAPI:
 
     temporal_address = os.environ.get("TEMPORAL_ADDRESS")
     temporal_namespace = os.environ.get("TEMPORAL_NAMESPACE", "default")
+    app_mode = _normalized_app_mode(os.environ.get("DURABLE_WORDLE_APP_MODE"))
+    show_booth_mode_toggle = os.environ.get(
+        "DURABLE_WORDLE_SHOW_MODE_TOGGLE", ""
+    ).lower() in {"1", "true", "yes", "on"}
     if temporal_address:
         return create_app(
             temporal_url=temporal_address,
             temporal_namespace=temporal_namespace,
             task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "wordle-tasks"),
+            app_mode=app_mode,
+            show_booth_mode_toggle=show_booth_mode_toggle,
         )
 
     config_file = Path(__file__).resolve().parent.parent.parent / "temporal.toml"
@@ -824,4 +973,6 @@ def create_production_app() -> FastAPI:
         temporal_url=connect_config.get("target_host", "localhost:7233"),
         temporal_namespace=connect_config.get("namespace", "default"),
         task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "wordle-tasks"),
+        app_mode=app_mode,
+        show_booth_mode_toggle=show_booth_mode_toggle,
     )

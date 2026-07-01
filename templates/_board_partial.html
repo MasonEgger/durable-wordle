@@ -70,6 +70,23 @@
 
 {% if status == "playing" %}
 <form id="guess-form" hx-post="/guess" hx-target="#game-content" hx-swap="innerHTML">
+    {% if show_game_mode_selector %}
+    <fieldset class="game-mode-selector" aria-label="Game mode">
+        {% for mode in game_modes %}
+        <label class="game-mode-option">
+            <input type="radio"
+                   name="game_mode"
+                   value="{{ mode.value }}"
+                   {% if mode == selected_game_mode %}checked{% endif %}>
+            <span>{{ "Absurdle" if mode.value == "absurdle" else mode.value | title }}</span>
+        </label>
+        {% endfor %}
+        <a class="game-mode-credit"
+           href="https://qntm.org/absurdle"
+           target="_blank"
+           rel="noreferrer">Absurdle by qntm</a>
+    </fieldset>
+    {% endif %}
     <input type="hidden" id="guess-input" name="guess" value="">
 </form>
 {% endif %}

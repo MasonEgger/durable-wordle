@@ -4,8 +4,17 @@ import datetime
 
 from temporalio.testing import ActivityEnvironment
 
-from durable_wordle.activities import select_word, validate_guess
-from durable_wordle.models import SelectWordInput, ValidateGuessInput
+from durable_wordle.activities import (
+    choose_absurdle_feedback,
+    select_word,
+    validate_guess,
+)
+from durable_wordle.models import (
+    AbsurdleFeedbackInput,
+    LetterFeedback,
+    SelectWordInput,
+    ValidateGuessInput,
+)
 from durable_wordle.word_lists import get_daily_word
 
 
@@ -120,3 +129,57 @@ class TestSelectWord:
 
 
 # Full calculate_feedback tests are in test_game_logic.py
+
+
+class TestChooseAbsurdleFeedback:
+    """Tests for adversarial Absurdle feedback selection."""
+
+    def test_chooses_largest_remaining_candidate_partition(
+        self, activity_environment: ActivityEnvironment
+    ) -> None:
+        """The activity should keep the largest possible candidate set."""
+        result = activity_environment.run(
+            choose_absurdle_feedback,
+            AbsurdleFeedbackInput(
+                guess="CRANE",
+                candidates=["BRICK", "SLUMP", "GHOST", "CRANK"],
+            ),
+        )
+
+        assert result.feedback == [
+            LetterFeedback.ABSENT,
+            LetterFeedback.ABSENT,
+            LetterFeedback.ABSENT,
+            LetterFeedback.ABSENT,
+            LetterFeedback.ABSENT,
+        ]
+        assert result.candidates == ["GHOST", "SLUMP"]
+        assert result.reveal_word == "GHOST"
+
+    def test_avoids_all_correct_feedback_when_other_candidates_remain(
+        self, activity_environment: ActivityEnvironment
+    ) -> None:
+        """Absurdle should not concede a win while another partition is larger."""
+        result = activity_environment.run(
+            choose_absurdle_feedback,
+            AbsurdleFeedbackInput(
+                guess="APPLE",
+                candidates=["APPLE", "BRICK", "GHOST"],
+            ),
+        )
+
+        assert result.feedback != [LetterFeedback.CORRECT] * 5
+        assert result.candidates == ["BRICK", "GHOST"]
+
+    def test_returns_all_correct_when_only_candidate_matches_guess(
+        self, activity_environment: ActivityEnvironment
+    ) -> None:
+        """The final candidate can still be guessed normally."""
+        result = activity_environment.run(
+            choose_absurdle_feedback,
+            AbsurdleFeedbackInput(guess="APPLE", candidates=["APPLE"]),
+        )
+
+        assert result.feedback == [LetterFeedback.CORRECT] * 5
+        assert result.candidates == ["APPLE"]
+        assert result.reveal_word == "APPLE"

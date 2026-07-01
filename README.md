@@ -8,7 +8,7 @@ A Wordle clone where each game session is a [Temporal](https://temporal.io) work
 
 Close the browser, reopen it, and your game is still there. That's durable execution.
 
-The booth experience adds a madlib start screen, a SQLite-backed leaderboard (the only persistence — used for scores and prize outreach, never for game state), and a [second-screen "holographic" display](#second-screen-holographic-display) that shows the live Temporal workflow timeline while someone plays and cycles fun animations when idle.
+`just dev` runs the teachable classic game: a board-first Wordle with Daily, Random, and Absurdle modes. `just booth` runs the event experience, adding lead capture, a madlib start screen, a SQLite-backed leaderboard (the only persistence — used for scores and prize outreach, never for game state), and a [second-screen "holographic" display](#second-screen-holographic-display).
 
 ## Temporal Concepts Demonstrated
 
@@ -17,7 +17,7 @@ The booth experience adds a madlib start screen, a SQLite-backed leaderboard (th
 | **Start Workflow** | Each session starts a workflow; deterministic ID reconnects returning players | `api.py` → `_get_or_start_workflow()` |
 | **Updates** | Guesses mutate workflow state and return feedback; a validator rejects bad input before history is written | `workflow.py` → `make_guess()` |
 | **Queries** | Read-only game board retrieval, safe to call any time | `workflow.py` → `get_game_state()` |
-| **Activities** | Word selection, guess validation (dictionary API), and feedback calculation — each visible in event history | `activities.py` |
+| **Activities** | Word selection, guess validation, feedback calculation, and Absurdle partitioning — each visible in event history | `activities.py` |
 | **Durable Execution** | Workflow holds state in memory; worker restarts replay history to rebuild state with zero data loss | `workflow.py` → `run()` |
 | **Workflow Completion** | The workflow completes when the player wins, loses, or goes idle past the inactivity timeout — then it's no longer `RUNNING` | `workflow.py` → `run()` |
 
@@ -31,11 +31,12 @@ flowchart LR
     UserSessionWorkflow --> select_word["select_word (Activity)"]
     UserSessionWorkflow --> validate_guess["validate_guess (Activity)"]
     UserSessionWorkflow --> calculate_feedback["calculate_feedback (Activity)"]
+    UserSessionWorkflow --> choose_absurdle_feedback["choose_absurdle_feedback (Activity)"]
 ```
 
-- **One workflow per game session** — cookie holds a session UUID; workflow ID is `wordle-{date}-{session_id}` (or `wordle-random-{game_id}`)
-- **The workflow is the game state** — event history is the source of truth; the only database is a small SQLite leaderboard for scores
-- **Random word per game** — `select_word` picks a random answer; the workflow uses `workflow.random()`/`workflow.now()` for deterministic replay
+- **One workflow per game session** — cookie holds a session UUID; workflow IDs are `wordle-{date}-{session_id}`, `wordle-random-{game_id}`, or `wordle-absurdle-{game_id}`
+- **The workflow is the game state** — event history is the source of truth; the only database is a small booth leaderboard for scores
+- **Multiple game modes** — Daily and Random select a target word up front; Absurdle skips initial word selection and keeps candidate state in the workflow
 - **Inactivity timeout** — a game with no guesses for 60s completes as `abandoned`, so the booth display returns to idle and stale workflows don't pile up
 - **Fully playable via CLI** — the workflow is the complete game; the web UI is just a skin (see [Playing via Temporal CLI](#playing-via-temporal-cli))
 
@@ -68,7 +69,15 @@ uv sync
 just dev
 ```
 
-This starts the Temporal dev server, waits for it to become healthy, then runs the worker and FastAPI web server together — Ctrl-C stops all three. Open **http://localhost:8000** to play; the Temporal UI is at **http://localhost:8233** and the health check at **http://localhost:8000/health**.
+This starts the Temporal dev server, waits for it to become healthy, then runs the worker and FastAPI web server in **classic** mode — Ctrl-C stops all three. Open **http://localhost:8000** to play; the Temporal UI is at **http://localhost:8233** and the health check at **http://localhost:8000/health**.
+
+For the full conference booth experience:
+
+```bash
+just booth
+```
+
+`just booth` runs the same stack in **booth** mode and opens the game plus display kiosk windows. Set `DURABLE_WORDLE_SHOW_MODE_TOGGLE=1` before launching if the booth start form should expose the Random/Absurdle operator toggle.
 
 If you'd rather run each process separately, use three terminal windows:
 
@@ -111,13 +120,13 @@ For Temporal Cloud, set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and `TEMPORAL_
 
 ## Second Screen (Holographic Display)
 
-Open **http://localhost:8000/display** in a second browser window for a companion screen designed for the booth's holographic fans (dark background, high contrast, centered content). `just booth` starts the whole stack and opens both the game and this display in Firefox kiosk windows.
+Open **http://localhost:8000/display** in a second browser window for a companion screen designed for the booth's holographic fans (dark background, high contrast, centered content). `just booth` starts the whole stack and opens both the game and this display in kiosk windows.
 
 **Calibration:** the display opens on a calibration overlay — concentric rings and a crosshair to align against the fan's visible circle, plus a width box previewing the timeline. Use the arrow keys (or on-screen D-pad) to re-center, `[`/`]` to resize, then **Save & Launch**. The values persist in `localStorage`, so on later launches you just confirm. Under the hood these map to CSS knobs (`--shift-x`, `--shift-y`, `--circle-w`).
 
-Once launched it self-switches between two modes by polling `GET /api/active-game` every 2 seconds:
+Once launched it self-switches between two modes by polling `GET /api/display-state`:
 
-- **Attract mode** (no game running) — cycles a floating Ziggy + Temporal logo, the players' madlib phrases, and the live leaderboard.
+- **Attract mode** (no game running) — cycles a floating Ziggy + Temporal logo, the players' madlib phrases, and the leaderboard snapshot. The leaderboard refreshes when the display returns from a game so the scroll can complete without jerking back to the top.
 - **Game mode** (a game is running) — shows only the live Temporal **workflow timeline**. The Temporal UI is same-origin-proxied under `/temporal-ui/` (the app strips `X-Frame-Options`/CSP so it can be embedded), and the page extracts just the timeline SVG from a hidden iframe, re-cloning it every 1.5s so it stays live as events arrive.
 
 The display tracks the most recently started running workflow, and `POST /play` terminates any other running game so only one is ever active at the booth. When the game ends (win/loss/timeout), the display returns to attract mode automatically.
@@ -169,14 +178,14 @@ temporal workflow show --workflow-id wordle-cli-game
 
 Every step is visible: the word selection activity, each guess's validation and feedback activities, and the final game result.
 
-Each game gets a random word via the `select_word` activity, so two sessions won't share an answer.
+Each default game gets a random word via the `select_word` activity, so two sessions won't share an answer. To start Absurdle from the CLI, pass `"game_mode": "absurdle"` in the workflow input; each guess will run `choose_absurdle_feedback` instead of selecting a target word up front.
 
 ## Development
 
 ```bash
 just check      # lint + typecheck + test (the gate)
-just dev        # start Temporal server + worker + web UI together
-just booth      # just dev + open the game and display in Firefox kiosk windows
+just dev        # classic board-first Wordle for learning the codebase
+just booth      # booth mode with lead capture, leaderboard, display, and kiosks
 just server     # start Temporal local dev server
 just worker     # start Temporal worker
 just ui         # start FastAPI web server

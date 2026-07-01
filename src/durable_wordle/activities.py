@@ -8,6 +8,8 @@ import requests
 from temporalio import activity
 
 from durable_wordle.models import (
+    AbsurdleFeedbackInput,
+    AbsurdleFeedbackResult,
     CalculateFeedbackInput,
     LetterFeedback,
     SelectWordInput,
@@ -16,6 +18,11 @@ from durable_wordle.models import (
 from durable_wordle.word_lists import ANSWER_LIST, get_daily_word, is_valid_guess
 
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en"
+FEEDBACK_RANK: dict[LetterFeedback, int] = {
+    LetterFeedback.ABSENT: 0,
+    LetterFeedback.PRESENT: 1,
+    LetterFeedback.CORRECT: 2,
+}
 
 
 @activity.defn
@@ -92,8 +99,76 @@ def calculate_feedback(
     :param activity_input: Contains the guess and target words.
     :returns: A list of per-letter feedback values.
     """
+    feedback = _calculate_feedback(activity_input.guess, activity_input.target)
+
+    feedback_summary = "".join(
+        feedback_item.value[0].upper() for feedback_item in feedback
+    )
+    activity.logger.info(
+        "calculate_feedback: %s vs %s → %s",
+        activity_input.guess.upper(),
+        activity_input.target.upper(),
+        feedback_summary,
+    )
+    return feedback
+
+
+@activity.defn
+def choose_absurdle_feedback(
+    activity_input: AbsurdleFeedbackInput,
+) -> AbsurdleFeedbackResult:
+    """Choose adversarial Absurdle feedback for a guess.
+
+    Candidate words are partitioned by the feedback they would produce. The
+    activity chooses the partition that leaves the most possible answers, with
+    deterministic tie-breakers that prefer less helpful feedback.
+
+    :param activity_input: Contains the guess and current candidate list.
+    :returns: Selected feedback, remaining candidates, and a reveal word.
+    """
     guess = activity_input.guess.upper()
-    target = activity_input.target.upper()
+    candidate_words = sorted(
+        {candidate.upper() for candidate in activity_input.candidates}
+    )
+    if not candidate_words:
+        return AbsurdleFeedbackResult(
+            feedback=[LetterFeedback.ABSENT] * len(guess),
+            candidates=[],
+            reveal_word=guess,
+        )
+
+    partitions: dict[tuple[LetterFeedback, ...], list[str]] = {}
+    for candidate_word in candidate_words:
+        feedback = tuple(_calculate_feedback(guess, candidate_word))
+        partitions.setdefault(feedback, []).append(candidate_word)
+
+    selected_feedback, selected_candidates = max(
+        partitions.items(),
+        key=lambda partition: _absurdle_partition_key(
+            partition[0],
+            partition[1],
+        ),
+    )
+    reveal_word = selected_candidates[0]
+    feedback_summary = "".join(
+        feedback_item.value[0].upper() for feedback_item in selected_feedback
+    )
+    activity.logger.info(
+        "choose_absurdle_feedback: %s → %s (%d candidates)",
+        guess,
+        feedback_summary,
+        len(selected_candidates),
+    )
+    return AbsurdleFeedbackResult(
+        feedback=list(selected_feedback),
+        candidates=selected_candidates,
+        reveal_word=reveal_word,
+    )
+
+
+def _calculate_feedback(guess_input: str, target_input: str) -> list[LetterFeedback]:
+    guess = guess_input.upper()
+    target = target_input.upper()
 
     feedback: list[LetterFeedback] = [LetterFeedback.ABSENT] * len(guess)
     remaining_counts: Counter[str] = Counter(target)
@@ -112,11 +187,21 @@ def calculate_feedback(
             feedback[position] = LetterFeedback.PRESENT
             remaining_counts[guess[position]] -= 1
 
-    feedback_summary = "".join(fb.value[0].upper() for fb in feedback)
-    activity.logger.info(
-        "calculate_feedback: %s vs %s → %s",
-        guess,
-        target,
-        feedback_summary,
-    )
     return feedback
+
+
+def _absurdle_partition_key(
+    feedback: tuple[LetterFeedback, ...],
+    candidates: list[str],
+) -> tuple[int, int, int, tuple[int, ...]]:
+    correct_count = feedback.count(LetterFeedback.CORRECT)
+    present_count = feedback.count(LetterFeedback.PRESENT)
+    feedback_pattern_key = tuple(
+        -FEEDBACK_RANK[feedback_item] for feedback_item in feedback
+    )
+    return (
+        len(candidates),
+        -correct_count,
+        -present_count,
+        feedback_pattern_key,
+    )

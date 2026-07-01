@@ -43,7 +43,7 @@ def isolate_leaderboard_db(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> Generator[None, None, None]:
     """Point all tests at a throwaway leaderboard DB."""
-    from durable_wordle import leaderboard
+    from durable_wordle.booth import leaderboard
 
     monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "leaderboard.db")
     monkeypatch.setattr(leaderboard, "_schema_ready", False)

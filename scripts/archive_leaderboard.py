@@ -18,7 +18,7 @@ import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from durable_wordle.leaderboard import (
+from durable_wordle.booth.leaderboard import (
     get_entries_for_date,
     get_participants_for_date,
 )

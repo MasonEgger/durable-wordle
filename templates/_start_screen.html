@@ -49,6 +49,23 @@
                        class="text-input text-input--code">
             </div>
 
+            {% if show_game_mode_selector %}
+            <fieldset class="game-mode-selector game-mode-selector--start" aria-label="Game mode">
+                <label class="game-mode-option">
+                    <input type="radio" name="game_mode" value="random" checked>
+                    <span>Random</span>
+                </label>
+                <label class="game-mode-option">
+                    <input type="radio" name="game_mode" value="absurdle">
+                    <span>Absurdle</span>
+                </label>
+                <a class="game-mode-credit"
+                   href="https://qntm.org/absurdle"
+                   target="_blank"
+                   rel="noreferrer">Absurdle by qntm</a>
+            </fieldset>
+            {% endif %}
+
             <div class="action-row">
                 <button type="submit"
                         class="btn btn--primary btn--full">

@@ -11,15 +11,27 @@ from temporalio.worker import Worker
 
 from durable_wordle.activities import (
     calculate_feedback,
+    choose_absurdle_feedback,
     select_word,
     validate_guess,
 )
-from durable_wordle.models import LetterFeedback, MakeGuessInput, WorkflowInput
-from durable_wordle.word_lists import ANSWER_LIST
+from durable_wordle.models import (
+    GameMode,
+    LetterFeedback,
+    MakeGuessInput,
+    WorkflowInput,
+)
+from durable_wordle.word_lists import ANSWER_LIST, VALID_GUESSES
 from durable_wordle.workflow import UserSessionWorkflow
 
 # Valid 5-letter words that are NOT in the answer list (guaranteed wrong)
 WRONG_GUESSES = ["ABOVE", "ABUSE", "ACTOR", "ADMIT", "ADOPT", "ADULT"]
+WORKFLOW_ACTIVITIES = [
+    calculate_feedback,
+    choose_absurdle_feedback,
+    select_word,
+    validate_guess,
+]
 
 
 class TestUserSessionWorkflow:
@@ -34,7 +46,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -66,7 +78,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -92,7 +104,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -117,7 +129,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -142,7 +154,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -181,7 +193,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -222,7 +234,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -266,7 +278,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -286,6 +298,40 @@ class TestUserSessionWorkflow:
                 assert state.target_word in ANSWER_LIST
                 assert state.status == "playing"
 
+    async def test_absurdle_mode_tracks_remaining_candidates(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Absurdle mode should persist candidate state after each guess."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=WORKFLOW_ACTIVITIES,
+                activity_executor=executor,
+            ):
+                handle = await workflow_environment.client.start_workflow(
+                    UserSessionWorkflow.run,
+                    WorkflowInput(
+                        session_id="absurdle-session",
+                        game_mode=GameMode.ABSURDLE,
+                    ),
+                    id=str(uuid.uuid4()),
+                    task_queue=task_queue,
+                )
+
+                result = await handle.execute_update(
+                    UserSessionWorkflow.make_guess,
+                    MakeGuessInput(guess="CRANE"),
+                )
+
+                state = await handle.query(UserSessionWorkflow.get_game_state)
+                assert result.word == "CRANE"
+                assert state.game_mode is GameMode.ABSURDLE
+                assert state.status == "playing"
+                assert 0 < len(state.remaining_candidates) < len(VALID_GUESSES)
+                assert state.target_word in state.remaining_candidates
+
 
 class TestInactivityTimeout:
     """Tests for the inactivity timeout that abandons idle games."""
@@ -299,7 +345,7 @@ class TestInactivityTimeout:
                     env.client,
                     task_queue=task_queue,
                     workflows=[UserSessionWorkflow],
-                    activities=[calculate_feedback, select_word, validate_guess],
+                    activities=WORKFLOW_ACTIVITIES,
                     activity_executor=executor,
                 ):
                     handle = await env.client.start_workflow(

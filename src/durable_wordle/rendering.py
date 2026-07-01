@@ -4,7 +4,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from durable_wordle.models import GameState, GuessResult, LetterFeedback
+from durable_wordle.models import GameMode, GameState, GuessResult, LetterFeedback
 
 KEYBOARD_ROWS: list[list[str]] = [
     ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
@@ -132,6 +132,12 @@ def game_context(
     """
     guesses = game_state.guesses if game_state else []
     status = game_state.status if game_state else "playing"
+    selected_game_mode = game_state.game_mode if game_state else GameMode.RANDOM
+    show_game_mode_selector = (
+        bool(getattr(request.app.state, "show_game_mode_selector", False))
+        and status == "playing"
+        and not guesses
+    )
 
     if game_state and game_state.status == "won":
         status_message = status_message or "🎉 SPLENDID! You won! 🎉"
@@ -164,6 +170,9 @@ def game_context(
         "keyboard_transition_indices": build_keyboard_transition_indices(guesses),
         "tile_feedback_css": TILE_FEEDBACK_CSS,
         "has_started": len(guesses) > 0,
+        "game_modes": list(GameMode),
+        "selected_game_mode": selected_game_mode,
+        "show_game_mode_selector": show_game_mode_selector,
         "animate": animate,
         "auto_share_after_reveal": auto_share_after_reveal,
         "started_at_ts": started_at_ts,
@@ -194,6 +203,9 @@ def render_full_page(
             "request": request,
             "screen_state": "start",
             "current_screen_template": "_start_screen.html",
+            "show_game_mode_selector": bool(
+                getattr(request.app.state, "show_game_mode_selector", False)
+            ),
         }
     else:
         context = {

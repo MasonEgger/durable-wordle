@@ -129,7 +129,7 @@ def test_guess_submission_succeeds(live_server: str, page: Page) -> None:
 def test_display_page_loads(live_server: str, page: Page) -> None:
     """The /display second screen loads and its external JS runs.
 
-    The particle field is built by static/display.js at load, so a populated
+    The particle field is built by static/booth/display.js at load, so a populated
     #particles proves the extracted module executed (not just the HTML shell).
     """
     page.goto(f"{live_server}/display")

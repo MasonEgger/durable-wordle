@@ -20,6 +20,19 @@ class LetterFeedback(enum.StrEnum):
     ABSENT = "absent"
 
 
+class GameMode(enum.StrEnum):
+    """Available game modes.
+
+    :cvar DAILY: Deterministic word based on the game date.
+    :cvar RANDOM: Random word selected at workflow start.
+    :cvar ABSURDLE: Adversarial mode that chooses feedback per guess.
+    """
+
+    DAILY = "daily"
+    RANDOM = "random"
+    ABSURDLE = "absurdle"
+
+
 @dataclass
 class GuessResult:
     """Result of a single guess attempt.
@@ -48,6 +61,8 @@ class GameState:
     max_guesses: int = 6
     status: str = "playing"
     started_at: datetime | None = None
+    game_mode: GameMode = GameMode.RANDOM
+    remaining_candidates: list[str] = field(default_factory=list)
 
     @property
     def is_game_over(self) -> bool:
@@ -63,11 +78,15 @@ class WorkflowInput:
     """Input for starting a new Wordle game session workflow.
 
     :param session_id: Unique session identifier for this game.
+    :param game_mode: Word selection and feedback mode.
+    :param game_date: ISO-format date used by daily mode.
     :param inactivity_timeout_seconds: Optional inactivity timeout override,
         used by tests and previews. ``None`` uses the production default.
     """
 
     session_id: str
+    game_mode: GameMode = GameMode.RANDOM
+    game_date: str = ""
     inactivity_timeout_seconds: float | None = None
 
 
@@ -112,3 +131,29 @@ class CalculateFeedbackInput:
 
     guess: str
     target: str
+
+
+@dataclass
+class AbsurdleFeedbackInput:
+    """Input for the Absurdle feedback activity.
+
+    :param guess: The guessed word (uppercase).
+    :param candidates: Candidate words still consistent with prior feedback.
+    """
+
+    guess: str
+    candidates: list[str]
+
+
+@dataclass
+class AbsurdleFeedbackResult:
+    """Result of an Absurdle feedback choice.
+
+    :param feedback: Per-letter feedback selected for this guess.
+    :param candidates: Remaining candidate words after applying feedback.
+    :param reveal_word: Deterministic word to reveal if the player loses.
+    """
+
+    feedback: list[LetterFeedback]
+    candidates: list[str]
+    reveal_word: str

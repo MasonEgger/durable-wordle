@@ -13,12 +13,15 @@ INACTIVITY_TIMEOUT = timedelta(seconds=60)
 with workflow.unsafe.imports_passed_through():
     from durable_wordle.activities import (
         calculate_feedback,
+        choose_absurdle_feedback,
         select_word,
         validate_guess,
     )
     from durable_wordle.models import (
         WORD_LENGTH,
+        AbsurdleFeedbackInput,
         CalculateFeedbackInput,
+        GameMode,
         GameState,
         GuessResult,
         LetterFeedback,
@@ -27,6 +30,7 @@ with workflow.unsafe.imports_passed_through():
         ValidateGuessInput,
         WorkflowInput,
     )
+    from durable_wordle.word_lists import VALID_GUESSES
 
 
 @workflow.defn
@@ -61,16 +65,32 @@ class UserSessionWorkflow:
         :param workflow_input: Contains session ID and game mode.
         :returns: The final game state when the game is over.
         """
-        workflow.logger.info("Selecting word: random")
-        target_word = await workflow.execute_activity(
-            select_word,
-            SelectWordInput(game_date=""),
-            start_to_close_timeout=timedelta(seconds=10),
-        )
-        self._game_state = GameState(target_word=target_word, started_at=workflow.now())
+        if workflow_input.game_mode is GameMode.ABSURDLE:
+            self._game_state = GameState(
+                target_word="",
+                started_at=workflow.now(),
+                game_mode=GameMode.ABSURDLE,
+                remaining_candidates=sorted(VALID_GUESSES),
+            )
+        else:
+            game_date = ""
+            if workflow_input.game_mode is GameMode.DAILY:
+                game_date = workflow_input.game_date
+            workflow.logger.info("Selecting word: %s", workflow_input.game_mode.value)
+            target_word = await workflow.execute_activity(
+                select_word,
+                SelectWordInput(game_date=game_date),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            self._game_state = GameState(
+                target_word=target_word,
+                started_at=workflow.now(),
+                game_mode=workflow_input.game_mode,
+            )
         workflow.logger.info(
-            "Game initialized (session=%s, mode=random)",
+            "Game initialized (session=%s, mode=%s)",
             workflow_input.session_id,
+            workflow_input.game_mode.value,
         )
         inactivity_timeout = INACTIVITY_TIMEOUT
         if workflow_input.inactivity_timeout_seconds is not None:
@@ -147,14 +167,30 @@ class UserSessionWorkflow:
                 type="InvalidWord",
             )
 
-        # Calculate letter feedback via activity for event history visibility
-        feedback = await workflow.execute_activity(
-            calculate_feedback,
-            CalculateFeedbackInput(
-                guess=normalized_guess, target=self._state.target_word
-            ),
-            start_to_close_timeout=timedelta(seconds=10),
-        )
+        if self._state.game_mode is GameMode.ABSURDLE:
+            absurdle_result = await workflow.execute_activity(
+                choose_absurdle_feedback,
+                AbsurdleFeedbackInput(
+                    guess=normalized_guess,
+                    candidates=self._state.remaining_candidates,
+                ),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            feedback = absurdle_result.feedback
+            self._state.remaining_candidates = absurdle_result.candidates
+            if all(letter == LetterFeedback.CORRECT for letter in feedback):
+                self._state.target_word = normalized_guess
+            else:
+                self._state.target_word = absurdle_result.reveal_word
+        else:
+            # Calculate letter feedback via activity for event history visibility
+            feedback = await workflow.execute_activity(
+                calculate_feedback,
+                CalculateFeedbackInput(
+                    guess=normalized_guess, target=self._state.target_word
+                ),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
 
         # Build result and update state
         guess_result = GuessResult(word=normalized_guess, feedback=feedback)

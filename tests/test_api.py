@@ -14,6 +14,7 @@ from temporalio.worker import Worker
 
 from durable_wordle.activities import (
     calculate_feedback,
+    choose_absurdle_feedback,
     select_word,
     validate_guess,
 )
@@ -22,8 +23,15 @@ from durable_wordle.api import (
     create_app,
     get_workflow_id,
 )
-from durable_wordle.models import WorkflowInput
+from durable_wordle.models import GameMode, WorkflowInput
 from durable_wordle.workflow import UserSessionWorkflow
+
+WORKFLOW_ACTIVITIES = [
+    calculate_feedback,
+    choose_absurdle_feedback,
+    select_word,
+    validate_guess,
+]
 
 
 def _make_client(
@@ -109,7 +117,7 @@ class TestSessionManagement:
 
 def test_api_tests_use_throwaway_leaderboard_database() -> None:
     """API tests should never write to the booth leaderboard database."""
-    from durable_wordle import leaderboard
+    from durable_wordle.booth import leaderboard
 
     assert leaderboard.DB_FILE != leaderboard._DEFAULT_DB
 
@@ -126,7 +134,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -143,7 +151,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -165,7 +173,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -183,7 +191,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -210,7 +218,7 @@ class TestGuessEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -234,6 +242,72 @@ class TestTemplateRendering:
             assert "start-screen" in body
             assert "PLAY" in body
 
+    async def test_classic_mode_starts_on_board_with_mode_selector(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Classic mode should be board-first with Daily/Random/Absurdle choices."""
+        app = create_app(
+            task_queue=task_queue,
+            temporal_client=workflow_environment.client,
+            app_mode="classic",
+        )
+        app.state.temporal_client = workflow_environment.client
+        app.state.task_queue = task_queue
+        transport = ASGITransport(app=app)  # type: ignore[arg-type]
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/")
+            body = response.text
+
+        assert response.status_code == 200
+        assert 'id="start-screen"' not in body
+        assert "game-board" in body
+        assert 'value="daily"' in body
+        assert 'value="random"' in body
+        assert 'value="absurdle"' in body
+        assert "https://qntm.org/absurdle" in body
+
+    async def test_classic_mode_can_start_absurdle_from_guess_form(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Submitting Absurdle mode should start an Absurdle workflow."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=WORKFLOW_ACTIVITIES,
+                activity_executor=executor,
+            ):
+                app = create_app(
+                    task_queue=task_queue,
+                    temporal_client=workflow_environment.client,
+                    app_mode="classic",
+                )
+                app.state.temporal_client = workflow_environment.client
+                app.state.task_queue = task_queue
+                transport = ASGITransport(app=app)  # type: ignore[arg-type]
+                async with AsyncClient(
+                    transport=transport, base_url="http://test"
+                ) as client:
+                    response = await client.post(
+                        "/guess",
+                        data={"guess": "CRANE", "game_mode": "absurdle"},
+                    )
+
+                    game_id = response.cookies["game_id"]
+                    workflow_id = get_workflow_id(
+                        game_id,
+                        game_mode=GameMode.ABSURDLE,
+                    )
+                    handle = workflow_environment.client.get_workflow_handle(
+                        workflow_id
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+
+        assert response.status_code == 200
+        assert response.cookies["game_mode"] == "absurdle"
+        assert state.game_mode is GameMode.ABSURDLE
+
     async def test_play_returns_game_grid(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
     ) -> None:
@@ -243,7 +317,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -264,7 +338,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -283,7 +357,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -309,7 +383,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -333,7 +407,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -351,7 +425,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -380,7 +454,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -422,8 +496,8 @@ class TestTemplateRendering:
         tmp_path: pathlib.Path,
     ) -> None:
         """Winning should auto-save a leaderboard entry without a manual POST."""
-        from durable_wordle import leaderboard
         from durable_wordle.api import _today_la
+        from durable_wordle.booth import leaderboard
 
         monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
         monkeypatch.setattr(leaderboard, "_schema_ready", False)
@@ -433,7 +507,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -461,8 +535,8 @@ class TestTemplateRendering:
         tmp_path: pathlib.Path,
     ) -> None:
         """POST /play should record every player (win or lose) for email outreach."""
-        from durable_wordle import leaderboard
         from durable_wordle.api import _today_la
+        from durable_wordle.booth import leaderboard
 
         monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
         monkeypatch.setattr(leaderboard, "_schema_ready", False)
@@ -472,7 +546,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -495,7 +569,7 @@ class TestTemplateRendering:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -543,7 +617,7 @@ class TestShareEndpoint:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -624,7 +698,7 @@ class TestDesignSystemCompliance:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -645,7 +719,7 @@ class TestDisplayEndpoints:
             body = response.text
             assert "attract" in body
             assert "game-mode" in body
-            assert "/static/display.js" in body  # external module is wired up
+            assert "/static/booth/display.js" in body  # external module is wired up
 
     async def test_display_calibration_uses_visible_full_circle_target(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
@@ -659,14 +733,14 @@ class TestDisplayEndpoints:
             assert 'id="cal-full-circle"' in body
             assert 'aria-label="Circle calibration controls"' in body
             assert 'data-nudge="center"' in body
-            display_css = pathlib.Path("static/display.css").read_text()
+            display_css = pathlib.Path("static/booth/display.css").read_text()
             assert "top: calc(50% + 10.5vmin)" in display_css
             assert "width: min(33vmin, 360px)" in display_css
             assert "transform: translate(-50%, -50%)" in display_css
 
     def test_display_content_uses_circle_safe_bounds(self) -> None:
         """Fan display content should stay inside the calibrated circle."""
-        display_css = pathlib.Path("static/display.css").read_text()
+        display_css = pathlib.Path("static/booth/display.css").read_text()
 
         assert "--circle-safe-w: calc(var(--circle-w) * 0.68)" in display_css
         assert "--circle-text-w: calc(var(--circle-w) * 0.58)" in display_css
@@ -680,8 +754,8 @@ class TestDisplayEndpoints:
 
     def test_display_leaderboard_scroll_reaches_bottom_quickly(self) -> None:
         """Leaderboard display should show the bottom rows before rotating away."""
-        display_css = pathlib.Path("static/display.css").read_text()
-        display_js = pathlib.Path("static/display.js").read_text()
+        display_css = pathlib.Path("static/booth/display.css").read_text()
+        display_js = pathlib.Path("static/booth/display.js").read_text()
 
         assert "linear 1 forwards" in display_css
         assert "infinite alternate" not in display_css
@@ -689,10 +763,12 @@ class TestDisplayEndpoints:
         assert "var LB_SCROLL_SPEED = 140" in display_js
         assert "(LB_DURATION_MS / 1000) - LB_SCROLL_END_PADDING_SECONDS" in display_js
         assert "Math.min(" in display_js
+        assert "var returnedToAttract = applyActiveGame(data.active_game)" in display_js
+        assert "if (!seenInitialDisplayState || returnedToAttract)" in display_js
 
     def test_display_timeline_reuses_cached_svg_placeholder(self) -> None:
         """Display should show a cached timeline SVG while the iframe warms up."""
-        display_js = pathlib.Path("static/display.js").read_text()
+        display_js = pathlib.Path("static/booth/display.js").read_text()
 
         assert (
             "var TIMELINE_CACHE_KEY = 'durable-wordle:first-timeline-svg'" in display_js
@@ -740,7 +816,7 @@ class TestDisplayEndpoints:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -760,7 +836,7 @@ class TestDisplayEndpoints:
         tmp_path: pathlib.Path,
     ) -> None:
         """GET /api/display-state should combine display polling data."""
-        from durable_wordle import leaderboard
+        from durable_wordle.booth import leaderboard
 
         monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
         monkeypatch.setattr(leaderboard, "_schema_ready", False)
@@ -784,7 +860,7 @@ class TestDisplayEndpoints:
         tmp_path: pathlib.Path,
     ) -> None:
         """GET /api/display-state should include the live workflow identity."""
-        from durable_wordle import leaderboard
+        from durable_wordle.booth import leaderboard
 
         monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
         monkeypatch.setattr(leaderboard, "_schema_ready", False)
@@ -794,7 +870,7 @@ class TestDisplayEndpoints:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -813,7 +889,7 @@ class TestDisplayEndpoints:
         tmp_path: pathlib.Path,
     ) -> None:
         """GET /api/display-state should reveal the target word after a loss."""
-        from durable_wordle import leaderboard
+        from durable_wordle.booth import leaderboard
 
         monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
         monkeypatch.setattr(leaderboard, "_schema_ready", False)
@@ -823,7 +899,7 @@ class TestDisplayEndpoints:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 async with _make_client(workflow_environment, task_queue) as client:
@@ -872,7 +948,7 @@ class TestDisplayEndpoints:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 workflow_id = get_workflow_id(str(uuid.uuid4()))
@@ -918,7 +994,7 @@ class TestLastWinEndpoint:
         tmp_path: pathlib.Path,
     ) -> None:
         """GET /api/last-win should return {"win": null} with no fresh entries."""
-        from durable_wordle import leaderboard
+        from durable_wordle.booth import leaderboard
 
         monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
         monkeypatch.setattr(leaderboard, "_schema_ready", False)
@@ -936,8 +1012,8 @@ class TestLastWinEndpoint:
         tmp_path: pathlib.Path,
     ) -> None:
         """GET /api/last-win should surface a freshly added winning entry."""
-        from durable_wordle import leaderboard
         from durable_wordle.api import _today_la
+        from durable_wordle.booth import leaderboard
 
         monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "lb.db")
         monkeypatch.setattr(leaderboard, "_schema_ready", False)

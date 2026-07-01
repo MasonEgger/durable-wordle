@@ -49,7 +49,12 @@ flowchart LR
     UserSessionWorkflow --> calculate_feedback["calculate_feedback (Activity)"]
 ```
 
-### Screens (SPA)
+### Runtime Modes
+
+- **Classic mode** (`DURABLE_WORDLE_APP_MODE=classic`, used by `just dev`) is the teachable board-first game. It exposes Daily, Random, and Absurdle selectors and avoids booth lead capture, display, and leaderboard routes in the main learning flow.
+- **Booth mode** (`DURABLE_WORDLE_APP_MODE=booth`, used by `just booth`) adds lead capture, madlibs, SQLite leaderboard/participants, the second-screen display, kiosk positioning, and the Temporal UI proxy. Booth-only Python modules live under `src/durable_wordle/booth/`; booth-only display assets live under `templates/booth/` and `static/booth/`.
+
+### Screens (Booth SPA)
 
 The app is a single-page SPA. `<main id="screen">` is the HTMX swap target. Three screens:
 
@@ -68,14 +73,15 @@ The app is a single-page SPA. `<main id="screen">` is the HTMX swap target. Thre
 | `madlib_noun` | `POST /play` | — | Cycling leaderboard phrase |
 | `madlib_verb` | `POST /play` | — | Cycling leaderboard phrase |
 
-(Note: the web app is random-mode only — daily mode was removed. `get_workflow_id(game_id)` always builds `wordle-random-{game_id}`.)
+`game_mode` stores the selected mode (`daily`, `random`, or `absurdle`) so later board/share requests resolve the same workflow ID.
 
 ### Workflow IDs
 
 - Daily: `wordle-{YYYY-MM-DD}-{session_id}`
 - Random: `wordle-random-{game_id}`
+- Absurdle: `wordle-absurdle-{game_id}`
 
-`get_workflow_id(session_id, game_date, game_id)` in `api.py` is the single source of truth.
+`get_workflow_id(game_id, session_id, game_date, game_mode)` in `api.py` is the single source of truth.
 
 ### Routing
 
@@ -90,10 +96,10 @@ The app is a single-page SPA. `<main id="screen">` is the HTMX swap target. Thre
 
 ## Key Modules
 
-- **`models.py`**: `WORD_LENGTH = 5` constant; `LetterFeedback` enum (CORRECT/PRESENT/ABSENT); `GuessResult`, `GameState`, `WorkflowInput`, `MakeGuessInput`, `ValidateGuessInput`, `SelectWordInput`, `CalculateFeedbackInput`
-- **`workflow.py`**: `UserSessionWorkflow` — `run()` selects word via activity then waits, `make_guess` Update handler with `wait_condition` guard for init race, `validate_make_guess` validator uses `WORD_LENGTH`, `get_game_state` Query handler
-- **`activities.py`**: Three sync activities — `validate_guess` (checks `VALID_GUESSES` frozenset first, falls back to dictionary API via `requests`), `select_word` (daily date-seeded or random), `calculate_feedback` (two-pass algorithm, normalizes inputs to uppercase)
-- **`leaderboard.py`**: SQLite-backed leaderboard at `data/leaderboard.db`. `TOP_N = 25`. Entries are scoped by `game_date` for daily resets. `add_entry(player_name, email, guesses, started_at, madlib_noun, madlib_verb, game_date)` inserts and returns top entries. `get_top_entries_for_date(game_date, n=TOP_N)` returns the top N for display. `get_entries_for_date(game_date)` returns ALL entries including email for prize outreach. `get_madlib_pairs(entries)` returns deduplicated `[noun, verb]` pairs. A separate `participants` table records EVERYONE who plays (win or lose) for post-event email outreach — `record_participant(player_name, email, madlib_noun, madlib_verb, game_date)` (called from `POST /play`, deduped per email/day, no-op on blank email) and `get_participants_for_date(game_date)`. Schema initialized lazily via `_ensure_schema()` with `_schema_ready` flag.
+- **`models.py`**: `WORD_LENGTH = 5` constant; `LetterFeedback` and `GameMode` enums; `GuessResult`, `GameState`, `WorkflowInput`, `MakeGuessInput`, `ValidateGuessInput`, `SelectWordInput`, `CalculateFeedbackInput`, `AbsurdleFeedbackInput`, `AbsurdleFeedbackResult`
+- **`workflow.py`**: `UserSessionWorkflow` — `run()` selects a word for Daily/Random or initializes sorted `VALID_GUESSES` candidates for Absurdle, `make_guess` Update handler with `wait_condition` guard for init race, `validate_make_guess` validator uses `WORD_LENGTH`, `get_game_state` Query handler
+- **`activities.py`**: Four sync activities — `validate_guess` (checks `VALID_GUESSES` frozenset first, falls back to dictionary API via `requests`), `select_word` (daily date-seeded or random), `calculate_feedback` (two-pass algorithm, normalizes inputs to uppercase), `choose_absurdle_feedback` (partitions remaining candidates and chooses the least helpful largest partition)
+- **`booth/leaderboard.py`**: SQLite-backed leaderboard at `data/leaderboard.db`. `TOP_N = 25`. Entries are scoped by `game_date` for daily resets. `add_entry(player_name, email, guesses, started_at, madlib_noun, madlib_verb, game_date)` inserts and returns top entries. `get_top_entries_for_date(game_date, n=TOP_N)` returns the top N for display. `get_entries_for_date(game_date)` returns ALL entries including email for prize outreach. `get_madlib_pairs(entries)` returns deduplicated `[noun, verb]` pairs. A separate `participants` table records EVERYONE who plays (win or lose) for post-event email outreach — `record_participant(player_name, email, madlib_noun, madlib_verb, game_date)` (called from `POST /play`, deduped per email/day, no-op on blank email) and `get_participants_for_date(game_date)`. Schema initialized lazily via `_ensure_schema()` with `_schema_ready` flag.
 - **`api.py`**: `create_app()` factory — FastAPI with cookie sessions, Temporal client lifecycle via lifespan. `_session_from_request(request)` extracts `(session_id, is_new_session, game_id)` — used in `GET /`, `POST /play`, `POST /guess`. `_wait_for_game_state()` retries up to 100×0.1s (10s) to handle the `select_word` activity init window.
 - **`worker.py`**: Temporal worker entry point — connects via `temporalio.envconfig`, registers workflow and all three activities, uses `ThreadPoolExecutor` for sync activities
 - **`word_lists.py`**: `ANSWER_LIST` (curated ~300 words), `VALID_GUESSES` (frozenset, includes extended words), `get_daily_word(date)` (date-seeded), `is_valid_guess(word)`

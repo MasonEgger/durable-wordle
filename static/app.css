@@ -441,6 +441,52 @@ body {
     opacity: 0.5;
 }
 
+.game-mode-selector {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    margin: 0.75rem auto 0;
+    border: 0;
+    padding: 0;
+}
+
+.game-mode-selector--start {
+    margin-top: 0.25rem;
+}
+
+.game-mode-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    padding: 0.45rem 0.75rem;
+    color: var(--color-soft);
+    font-family: "Space Mono", monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.game-mode-option:has(input:checked) {
+    border-color: var(--color-grellow);
+    color: var(--color-grellow);
+}
+
+.game-mode-option input {
+    accent-color: var(--color-grellow);
+}
+
+.game-mode-credit {
+    color: var(--color-indigo);
+    font-family: "Space Mono", monospace;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 :focus-visible {
     outline: 3px solid var(--color-grellow);
     outline-offset: 2px;

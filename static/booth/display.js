@@ -461,6 +461,7 @@
     var seenInitialDisplayState = false;
 
     function applyActiveGame(data) {
+        var wasGameMode = isGameMode;
         if (data && data.workflow_id && data.run_id) {
             if (!isGameMode || data.workflow_id !== activeWorkflowId) {
                 isGameMode = true;
@@ -472,14 +473,17 @@
             stopGameMode();
             startAttract();
         }
+        return wasGameMode && !isGameMode;
     }
 
     function pollDisplayState() {
         fetch('/api/display-state')
             .then(function (res) { return res.json(); })
             .then(function (data) {
-                applyLeaderboard(data.leaderboard);
-                applyActiveGame(data.active_game);
+                var returnedToAttract = applyActiveGame(data.active_game);
+                if (!seenInitialDisplayState || returnedToAttract) {
+                    applyLeaderboard(data.leaderboard);
+                }
                 applyWin(data.win, !seenInitialDisplayState);
                 applyLoss(data.loss, !seenInitialDisplayState);
                 seenInitialDisplayState = true;

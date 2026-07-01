@@ -12,6 +12,7 @@ from temporalio.worker import Worker
 
 from durable_wordle.activities import (
     calculate_feedback,
+    choose_absurdle_feedback,
     select_word,
     validate_guess,
 )
@@ -53,7 +54,12 @@ async def run_worker() -> None:
             client,
             task_queue=TASK_QUEUE,
             workflows=[UserSessionWorkflow],
-            activities=[calculate_feedback, select_word, validate_guess],
+            activities=[
+                calculate_feedback,
+                choose_absurdle_feedback,
+                select_word,
+                validate_guess,
+            ],
             activity_executor=activity_executor,
         )
         logging.info(

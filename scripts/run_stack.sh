@@ -64,9 +64,9 @@ start_worker() {
 
 start_ui() {
     if [ "$MODE" = "booth" ]; then
-        uv run uvicorn --factory durable_wordle.api:create_production_app &
+        DURABLE_WORDLE_APP_MODE=booth uv run uvicorn --factory durable_wordle.api:create_production_app &
     else
-        uv run uvicorn --factory durable_wordle.api:create_production_app --reload &
+        DURABLE_WORDLE_APP_MODE=classic uv run uvicorn --factory durable_wordle.api:create_production_app --reload &
     fi
     ui_pid=$!
 }
