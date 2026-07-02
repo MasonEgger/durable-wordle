@@ -85,6 +85,7 @@ class TestSessionManagement:
             response = await client.get("/")
             assert response.status_code == 200
             assert "session_id" in response.cookies
+            assert 'rel="icon" href="/static/mascot.svg"' in response.text
 
     async def test_get_index_reuses_existing_session_cookie(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
