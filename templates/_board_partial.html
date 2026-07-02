@@ -91,37 +91,6 @@
 </form>
 {% endif %}
 
-<div id="action-area" class="{% if status == 'playing' %}playing-action-area{% endif %}">
-    {% if status != "playing" %}
-    <div id="endgame-actions" class="{% if animate %}hidden{% endif %}">
-        {% if status == "won" %}
-        <button
-            hx-get="/share"
-            hx-target="#screen"
-            hx-swap="innerHTML"
-            class="btn btn--small btn--accent">
-            SHARE / SELFIE
-        </button>
-        {% endif %}
-        <a href="/new-game"
-           hx-get="/new-game"
-           hx-target="#screen"
-           hx-swap="innerHTML"
-           class="btn btn--small">
-            START OVER <span aria-hidden="true">&#8635;</span>
-        </a>
-    </div>
-    {% else %}
-    <a href="/new-game"
-       hx-get="/new-game"
-       hx-target="#screen"
-       hx-swap="innerHTML"
-       class="btn btn--small btn--muted">
-        START OVER <span aria-hidden="true">&#8635;</span>
-    </a>
-    {% endif %}
-</div>
-
 <div id="keyboard" aria-label="On-screen keyboard">
     {% for row in keyboard_rows %}
     <div class="keyboard-row">
@@ -159,3 +128,43 @@
     </div>
     {% endfor %}
 </div>
+
+{% if has_started or status != "playing" %}
+<div id="action-area" class="{% if status == 'playing' %}playing-action-area{% endif %}">
+    {% if selected_game_mode.value == "absurdle" and has_started %}
+    <a class="game-mode-credit game-mode-credit--keyboard"
+       href="https://qntm.org/absurdle"
+       target="_blank"
+       rel="noreferrer">Absurdle by qntm</a>
+    {% endif %}
+
+    {% if status != "playing" %}
+    <div id="endgame-actions" class="{% if animate %}hidden{% endif %}">
+        {% if status == "won" %}
+        <button
+            hx-get="/share"
+            hx-target="#screen"
+            hx-swap="innerHTML"
+            class="btn btn--small btn--accent">
+            SHARE / SELFIE
+        </button>
+        {% endif %}
+        <a href="/new-game"
+           hx-get="/new-game"
+           hx-target="#screen"
+           hx-swap="innerHTML"
+           class="btn btn--small">
+            START OVER <span aria-hidden="true">&#8635;</span>
+        </a>
+    </div>
+    {% else %}
+    <a href="/new-game"
+       hx-get="/new-game"
+       hx-target="#screen"
+       hx-swap="innerHTML"
+       class="btn btn--small btn--muted">
+        START OVER <span aria-hidden="true">&#8635;</span>
+    </a>
+    {% endif %}
+</div>
+{% endif %}

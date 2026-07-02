@@ -263,6 +263,7 @@ class TestTemplateRendering:
         assert "game-board" in body
         assert "game-timers" not in body
         assert "countdown-card" not in body
+        assert 'id="action-area"' not in body
         assert 'value="daily"' in body
         assert 'value="random"' in body
         assert 'value="absurdle"' in body
@@ -307,6 +308,9 @@ class TestTemplateRendering:
                     state = await handle.query(UserSessionWorkflow.get_game_state)
 
         assert response.status_code == 200
+        assert "START OVER" in response.text
+        assert "game-mode-credit--keyboard" in response.text
+        assert "Absurdle by qntm" in response.text
         assert response.cookies["game_mode"] == "absurdle"
         assert state.game_mode is GameMode.ABSURDLE
 

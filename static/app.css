@@ -497,6 +497,11 @@ body {
     opacity: 1;
 }
 
+.game-mode-credit--keyboard {
+    flex-basis: auto;
+    font-size: 0.66rem;
+}
+
 :focus-visible {
     outline: 3px solid var(--color-grellow);
     outline-offset: 2px;
@@ -747,16 +752,6 @@ body {
     background: var(--color-panel-soft);
 }
 
-.playing-action-area {
-    position: absolute;
-    top: 0.15rem;
-    right: 0.35rem;
-    margin: 0;
-    opacity: 0.65;
-    transform: scale(0.88);
-    transform-origin: top right;
-}
-
 #action-area,
 #endgame-actions {
     display: flex;
@@ -766,7 +761,18 @@ body {
 }
 
 #action-area {
-    margin-top: 0;
+    min-height: clamp(2.4rem, 4.2vh, 3.4rem);
+    margin-top: calc(var(--keyboard-gap) * 0.45);
+    flex-direction: column;
+    gap: calc(var(--keyboard-gap) * 0.7);
+}
+
+#endgame-actions {
+    flex-direction: row;
+}
+
+.playing-action-area {
+    opacity: 0.72;
 }
 
 #keyboard {
