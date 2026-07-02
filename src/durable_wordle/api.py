@@ -12,7 +12,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from temporalio.client import (
@@ -399,6 +399,14 @@ def create_app(
         :returns: A dict with ``status`` key.
         """
         return {"status": "ok"}
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> FileResponse:
+        """Serve the in-game Ziggy mascot as the browser favicon.
+
+        :returns: The mascot SVG response.
+        """
+        return FileResponse(STATIC_DIR / "mascot.svg", media_type="image/svg+xml")
 
     @app.get("/new-game")
     async def new_game(request: Request) -> Response:

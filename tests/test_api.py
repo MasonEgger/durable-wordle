@@ -73,6 +73,16 @@ class TestHealthEndpoint:
             assert response.status_code == 200
             assert response.json() == {"status": "ok"}
 
+    async def test_favicon_uses_ziggy_mascot(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """GET /favicon.ico should serve the same mascot asset as the page head."""
+        async with _make_client(workflow_environment, task_queue) as client:
+            response = await client.get("/favicon.ico")
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("image/svg+xml")
+            assert response.text.startswith("<svg")
+
 
 class TestSessionManagement:
     """Tests for cookie-based session management."""
