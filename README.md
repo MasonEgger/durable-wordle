@@ -4,22 +4,29 @@
   <a href="https://t.mp/durable-wordle"><img src="https://img.shields.io/badge/Play%20Durable%20Wordle%20Now%21-444CE7?style=for-the-badge" alt="Play Durable Wordle Now!" height="44"></a>
 </p>
 
-A Wordle clone where each game session is a [Temporal](https://temporal.io) workflow. No database — the workflow *is* the state. Built as a conference demo teaching core Temporal concepts through a game everyone already knows how to play.
+A Wordle clone where each game session is a [Temporal](https://temporal.io)
+workflow. No database - the workflow *is* the state. Built as a conference demo
+teaching core Temporal concepts through a game everyone already knows how to
+play.
 
-Close the browser, reopen it, and your game is still there. That's durable execution.
+Close the browser, reopen it, and your game is still there. That's durable
+execution.
 
-`just dev` runs the teachable classic game: a board-first Wordle with Daily, Random, and Absurdle modes. `just booth` runs the event experience, adding lead capture, a madlib start screen, a SQLite-backed leaderboard (the only persistence — used for scores and prize outreach, never for game state), and a [second-screen "holographic" display](#second-screen-holographic-display).
+`just dev` runs the teachable classic game: a board-first Wordle with Daily,
+Random, and Absurdle modes. The conference booth experience is documented
+separately in [docs/booth/README.md](docs/booth/README.md) so the main learning
+path stays focused on Temporal.
 
 ## Temporal Concepts Demonstrated
 
 | Concept | What It Does Here | Where to Look |
 |---|---|---|
-| **Start Workflow** | Each session starts a workflow; deterministic ID reconnects returning players | `api.py` → `_get_or_start_workflow()` |
-| **Updates** | Guesses mutate workflow state and return feedback; a validator rejects bad input before history is written | `workflow.py` → `make_guess()` |
-| **Queries** | Read-only game board retrieval, safe to call any time | `workflow.py` → `get_game_state()` |
-| **Activities** | Word selection, guess validation, feedback calculation, and Absurdle partitioning — each visible in event history | `activities.py` |
-| **Durable Execution** | Workflow holds state in memory; worker restarts replay history to rebuild state with zero data loss | `workflow.py` → `run()` |
-| **Workflow Completion** | The workflow completes when the player wins, loses, or goes idle past the inactivity timeout — then it's no longer `RUNNING` | `workflow.py` → `run()` |
+| **Start Workflow** | Each session starts a workflow; deterministic IDs reconnect returning players | `api.py` -> `_get_or_start_workflow()` |
+| **Updates** | Guesses mutate workflow state and return feedback; a validator rejects bad input before history is written | `workflow.py` -> `make_guess()` |
+| **Queries** | Read-only game board retrieval, safe to call any time | `workflow.py` -> `get_game_state()` |
+| **Activities** | Word selection, guess validation, feedback calculation, and Absurdle partitioning - each visible in event history | `activities.py` |
+| **Durable Execution** | Workflow holds state in memory; worker restarts replay history to rebuild state with zero data loss | `workflow.py` -> `run()` |
+| **Workflow Completion** | The workflow completes when the player wins or loses | `workflow.py` -> `run()` |
 
 ## Architecture
 
@@ -34,18 +41,20 @@ flowchart LR
     UserSessionWorkflow --> choose_absurdle_feedback["choose_absurdle_feedback (Activity)"]
 ```
 
-- **One workflow per game session** — cookie holds a session UUID; workflow IDs are `wordle-{date}-{session_id}`, `wordle-random-{game_id}`, or `wordle-absurdle-{game_id}`
-- **The workflow is the game state** — event history is the source of truth; the only database is a small booth leaderboard for scores
-- **Multiple game modes** — Daily and Random select a target word up front; Absurdle skips initial word selection and keeps candidate state in the workflow
-- **Inactivity timeout** — a game with no guesses for 60s completes as `abandoned`, so the booth display returns to idle and stale workflows don't pile up
-- **Fully playable via CLI** — the workflow is the complete game; the web UI is just a skin (see [Playing via Temporal CLI](#playing-via-temporal-cli))
+- **One workflow per game session** - cookie state chooses a deterministic
+  workflow ID for Daily, Random, or Absurdle mode.
+- **The workflow is the game state** - event history is the source of truth; the
+  web UI is only a skin.
+- **Multiple game modes** - Daily and Random select a target word up front;
+  Absurdle keeps candidate state in the workflow and delays choosing a final
+  answer.
+- **Fully playable via CLI** - the workflow is the complete game; see
+  [Playing via Temporal CLI](#playing-via-temporal-cli).
 
 ### Absurdle Mode
 
-Absurdle follows [qntm's original algorithm](https://qntm.org/absurdle): player
-guesses are validated against the large valid-guess list, but the adversarial
-hidden candidate set starts from the smaller answer list. The workflow does not
-pick a secret word up front. Instead, each guess calls the
+Absurdle follows [qntm's original algorithm](https://qntm.org/absurdle). The
+workflow does not pick a secret word up front. Instead, each guess calls the
 `choose_absurdle_feedback` activity, which:
 
 1. partitions the remaining answer candidates by the Wordle feedback they would
@@ -55,30 +64,32 @@ pick a secret word up front. Instead, each guess calls the
 4. stores the selected partition back in workflow state as
    `remaining_candidates`.
 
-When only one answer remains, the mode behaves like normal Wordle until the
+When only one answer remains, Absurdle behaves like normal Wordle until the
 player guesses that word or runs out of attempts.
 
 ## Prerequisites
 
 - **Python 3.12+**
-- **[uv](https://docs.astral.sh/uv/)** — Python package manager
-- **[just](https://github.com/casey/just)** — task runner
-- **[Temporal CLI](https://docs.temporal.io/cli)** — for the local dev server
+- **[uv](https://docs.astral.sh/uv/)** - Python package manager
+- **[just](https://github.com/casey/just)** - task runner
+- **[Temporal CLI](https://docs.temporal.io/cli)** - for the local dev server
 
 ### Install Temporal CLI
 
 **macOS:**
+
 ```bash
 brew install temporal
 ```
 
 **Linux:**
+
 ```bash
 # Download from https://temporal.download/cli/archive/latest?platform=linux&arch=amd64
 # Extract and add `temporal` to your PATH
 ```
 
-## Running Locally (without Docker)
+## Running Locally
 
 The easiest path is one command:
 
@@ -87,15 +98,12 @@ uv sync
 just dev
 ```
 
-This starts the Temporal dev server, waits for it to become healthy, then runs the worker and FastAPI web server in **classic** mode — Ctrl-C stops all three. Open **http://localhost:8000** to play; the Temporal UI is at **http://localhost:8233** and the health check at **http://localhost:8000/health**.
+This starts the Temporal dev server, waits for it to become healthy, then runs
+the worker and FastAPI web server in **classic** mode. Ctrl-C stops all three.
 
-For the full conference booth experience:
-
-```bash
-just booth
-```
-
-`just booth` runs the same stack in **booth** mode and opens the game plus display kiosk windows. Set `DURABLE_WORDLE_SHOW_MODE_TOGGLE=1` before launching if the booth start form should expose the Random/Absurdle operator toggle.
+Open **http://localhost:8000** to play. The Temporal UI is at
+**http://localhost:8233** and the health check is at
+**http://localhost:8000/health**.
 
 If you'd rather run each process separately, use three terminal windows:
 
@@ -105,7 +113,8 @@ If you'd rather run each process separately, use three terminal windows:
 just server
 ```
 
-This starts a local Temporal server at `localhost:7233` with an ephemeral SQLite database and the Temporal UI at `http://localhost:8233`.
+This starts a local Temporal server at `localhost:7233` with an ephemeral SQLite
+database and the Temporal UI at `http://localhost:8233`.
 
 ### Terminal 2: Start the worker
 
@@ -114,7 +123,8 @@ uv sync
 just worker
 ```
 
-The worker connects to Temporal and polls for workflow tasks. It registers the `UserSessionWorkflow` and all three activities.
+The worker connects to Temporal and polls for workflow tasks. It registers the
+`UserSessionWorkflow` and the activities used by each game mode.
 
 ### Terminal 3: Start the web server
 
@@ -126,7 +136,10 @@ Open **http://localhost:8000** in your browser and play.
 
 ### Configuration
 
-Connection settings use Temporal's standard [`envconfig`](https://docs.temporal.io/develop/environment-configuration) system — environment variables, TOML profiles, or both. Defaults work for local development out of the box.
+Connection settings use Temporal's standard
+[`envconfig`](https://docs.temporal.io/develop/environment-configuration) system
+- environment variables, TOML profiles, or both. Defaults work for local
+development out of the box.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -134,34 +147,28 @@ Connection settings use Temporal's standard [`envconfig`](https://docs.temporal.
 | `TEMPORAL_NAMESPACE` | `default` | Temporal namespace |
 | `TEMPORAL_TASK_QUEUE` | `wordle-tasks` | Task queue name (app-specific) |
 
-For Temporal Cloud, set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and `TEMPORAL_API_KEY` (or mTLS certs). See the [Temporal docs](https://docs.temporal.io/develop/python/temporal-client#connect-to-temporal-cloud) for details.
-
-## Second Screen (Holographic Display)
-
-Open **http://localhost:8000/display** in a second browser window for a companion screen designed for the booth's holographic fans (dark background, high contrast, centered content). `just booth` starts the whole stack and opens both the game and this display in kiosk windows.
-
-**Calibration:** the display opens on a calibration overlay — concentric rings and a crosshair to align against the fan's visible circle, plus a width box previewing the timeline. Use the arrow keys (or on-screen D-pad) to re-center, `[`/`]` to resize, then **Save & Launch**. The values persist in `localStorage`, so on later launches you just confirm. Under the hood these map to CSS knobs (`--shift-x`, `--shift-y`, `--circle-w`).
-
-Once launched it self-switches between two modes by polling `GET /api/display-state`:
-
-- **Attract mode** (no game running) — cycles a floating Ziggy + Temporal logo, the players' madlib phrases, and the leaderboard snapshot. The leaderboard refreshes when the display returns from a game so the scroll can complete without jerking back to the top.
-- **Game mode** (a game is running) — shows only the live Temporal **workflow timeline**. The Temporal UI is same-origin-proxied under `/temporal-ui/` (the app strips `X-Frame-Options`/CSP so it can be embedded), and the page extracts just the timeline SVG from a hidden iframe, re-cloning it every 1.5s so it stays live as events arrive.
-
-The display tracks the most recently started running workflow, and `POST /play` terminates any other running game so only one is ever active at the booth. When the game ends (win/loss/timeout), the display returns to attract mode automatically.
+For Temporal Cloud, set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and
+`TEMPORAL_API_KEY` (or mTLS certs). See the
+[Temporal docs](https://docs.temporal.io/develop/python/temporal-client#connect-to-temporal-cloud)
+for details.
 
 ## Playing via Temporal CLI
 
-The workflow is the complete game — you don't need the web UI. With a Temporal dev server and worker running, you can play entirely from the command line.
+The workflow is the complete game - you don't need the web UI. With a Temporal
+dev server and worker running, you can play entirely from the command line.
 
-### Start a game (random word)
+### Start a game
 
 ```bash
 temporal workflow start \
   --type UserSessionWorkflow \
   --task-queue wordle-tasks \
   --workflow-id wordle-cli-game \
-  --input '{"session_id": "cli-test"}'
+  --input '{"session_id": "cli-test", "game_mode": "random"}'
 ```
+
+Use `"game_mode": "daily"` for a daily game or `"game_mode": "absurdle"` for
+Absurdle.
 
 ### Make a guess
 
@@ -186,7 +193,8 @@ temporal workflow query \
   --name get_game_state
 ```
 
-Returns the full game state — target word, all guesses with feedback, status, and remaining guesses.
+Returns the full game state - target word, all guesses with feedback, status,
+and remaining guesses.
 
 ### View the event history
 
@@ -194,22 +202,21 @@ Returns the full game state — target word, all guesses with feedback, status, 
 temporal workflow show --workflow-id wordle-cli-game
 ```
 
-Every step is visible: the word selection activity, each guess's validation and feedback activities, and the final game result.
-
-Each default game gets a random word via the `select_word` activity, so two sessions won't share an answer. To start Absurdle from the CLI, pass `"game_mode": "absurdle"` in the workflow input; each guess will run `choose_absurdle_feedback` instead of selecting a target word up front.
+Every step is visible: the word selection activity, each guess's validation and
+feedback activities, Absurdle candidate partitioning when enabled, and the final
+game result.
 
 ## Development
 
 ```bash
 just check      # lint + typecheck + test (the gate)
 just dev        # classic board-first Wordle for learning the codebase
-just booth      # booth mode with lead capture, leaderboard, display, and kiosks
 just server     # start Temporal local dev server
 just worker     # start Temporal worker
 just ui         # start FastAPI web server
 just test       # run tests
 just test-e2e   # full-stack browser smoke tests (Playwright)
-just build-css  # rebuild static/tailwind.css from templates/JS (after class changes)
+just build-css  # rebuild static/tailwind.css from templates/JS
 just lint       # ruff check
 just typecheck  # mypy strict
 just format     # ruff format
@@ -223,24 +230,26 @@ uv run playwright install chromium   # one-time browser download
 just test-e2e                        # boots Temporal + worker + app, drives Chromium
 ```
 
-They cover the booth-critical flows: keyboard-only start (Tab→PLAY→Enter), guess submission (regression guard for the HTMX 422 bug), and the display page. They need the `temporal` binary and skip automatically if it (or the required ports) is unavailable.
-
 Run a single test:
+
 ```bash
 uv run pytest tests/test_game_logic.py::test_all_correct_letters -v
 ```
 
 ## Running with Docker Compose
 
-If you'd rather not install Temporal locally, Docker Compose runs everything for you — Temporal server, worker, and web app:
+If you'd rather not install Temporal locally, Docker Compose runs everything for
+you - Temporal server, worker, and web app:
 
 ```bash
 docker compose up --build
 ```
 
-Open **http://localhost:8000** to play. The Temporal UI is available at **http://localhost:8233**.
+Open **http://localhost:8000** to play. The Temporal UI is available at
+**http://localhost:8233**.
 
 To stop:
+
 ```bash
 docker compose down
 ```
@@ -248,7 +257,7 @@ docker compose down
 ## Tech Stack
 
 - **Backend:** Temporal Python SDK, FastAPI, Jinja2
-- **Frontend:** HTMX, Tailwind CSS (prebuilt + committed, no CDN — works offline), Space Mono
-- **Persistence:** SQLite — leaderboard scores only; game state lives in the workflow
+- **Frontend:** HTMX, Tailwind CSS (prebuilt + committed, no CDN - works
+  offline), Space Mono
 - **Package management:** uv
 - **Task runner:** just
