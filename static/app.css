@@ -480,11 +480,21 @@ body {
 }
 
 .game-mode-credit {
+    flex-basis: 100%;
     color: var(--color-indigo);
     font-family: "Space Mono", monospace;
     font-size: 0.68rem;
     font-weight: 700;
+    text-align: center;
     text-transform: uppercase;
+    opacity: 0.8;
+    transition: color 150ms ease, opacity 150ms ease;
+}
+
+.game-mode-credit:hover,
+.game-mode-credit:focus-visible {
+    color: var(--color-grellow);
+    opacity: 1;
 }
 
 :focus-visible {
