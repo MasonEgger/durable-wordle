@@ -118,15 +118,28 @@ def _normalized_app_mode(raw_mode: str | None) -> str:
     return APP_MODE_CLASSIC
 
 
-def _game_mode_from_value(raw_mode: str | None) -> GameMode:
+def _game_mode_from_value(raw_mode: str | None, default: GameMode) -> GameMode:
     """Parse a submitted or cookie-backed game mode.
 
     :param raw_mode: Raw game mode string.
-    :returns: Parsed game mode, defaulting to random.
+    :param default: Mode to use when ``raw_mode`` is missing or unrecognized.
+    :returns: Parsed game mode.
     """
     if raw_mode in {mode.value for mode in GameMode}:
         return GameMode(raw_mode)
-    return GameMode.RANDOM
+    return default
+
+
+def _default_game_mode(app_mode: str) -> GameMode:
+    """Return the default game mode for a runtime app mode.
+
+    Classic mirrors the original Wordle default (daily); booth stays random so
+    every kiosk visitor gets a fresh word.
+
+    :param app_mode: The normalized runtime app mode.
+    :returns: The default game mode for that app mode.
+    """
+    return GameMode.DAILY if app_mode == APP_MODE_CLASSIC else GameMode.RANDOM
 
 
 def _game_mode_from_request(
@@ -135,11 +148,18 @@ def _game_mode_from_request(
 ) -> GameMode:
     """Resolve the active game mode from form data or cookies.
 
+    Falls back to the app-mode default (daily in classic, random in booth) when
+    no explicit mode is submitted or stored.
+
     :param request: The incoming HTTP request.
     :param submitted_mode: Optional form-submitted game mode.
     :returns: The selected game mode.
     """
-    return _game_mode_from_value(submitted_mode or request.cookies.get("game_mode"))
+    app_mode = getattr(request.app.state, "app_mode", APP_MODE_BOOTH)
+    return _game_mode_from_value(
+        submitted_mode or request.cookies.get("game_mode"),
+        default=_default_game_mode(app_mode),
+    )
 
 
 def get_workflow_id(

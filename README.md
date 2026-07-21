@@ -28,6 +28,9 @@ No sign-up, no lead capture, no database.
 This is what you get when the variable is unset, so a fresh `git clone` followed
 by `just dev`, `just ui`, or `docker compose up` runs classic.
 If you just want the Temporal Wordle demo, you never touch this variable.
+The board carries a Daily / Random / Absurdle selector, and it defaults to
+**Daily** (the date-seeded word everyone gets that day). Pick Random for a new
+word each game, or Absurdle for the adversarial variant.
 
 **Booth.**
 The conference-booth experience layered on top of the same workflow: a lead-capture

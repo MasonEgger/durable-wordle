@@ -61,7 +61,7 @@ class GameState:
     max_guesses: int = 6
     status: str = "playing"
     started_at: datetime | None = None
-    game_mode: GameMode = GameMode.RANDOM
+    game_mode: GameMode = GameMode.DAILY
     remaining_candidates: list[str] = field(default_factory=list)
 
     @property

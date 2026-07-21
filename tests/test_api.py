@@ -20,6 +20,7 @@ from durable_wordle.activities import (
 )
 from durable_wordle.api import (
     _TemporalUiStaticAccessLogFilter,
+    _today_la,
     create_app,
     get_workflow_id,
 )
@@ -330,6 +331,48 @@ class TestTemplateRendering:
         assert "Absurdle by qntm" in response.text
         assert response.cookies["game_mode"] == "absurdle"
         assert state.game_mode is GameMode.ABSURDLE
+
+    async def test_classic_mode_defaults_to_daily(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """With no mode chosen, classic should start a Daily game."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=WORKFLOW_ACTIVITIES,
+                activity_executor=executor,
+            ):
+                app = create_app(
+                    task_queue=task_queue,
+                    temporal_client=workflow_environment.client,
+                    app_mode="classic",
+                )
+                app.state.temporal_client = workflow_environment.client
+                app.state.task_queue = task_queue
+                transport = ASGITransport(app=app)  # type: ignore[arg-type]
+                async with AsyncClient(
+                    transport=transport, base_url="http://test"
+                ) as client:
+                    response = await client.post("/guess", data={"guess": "CRANE"})
+
+                    session_id = response.cookies["session_id"]
+                    game_id = response.cookies["game_id"]
+                    workflow_id = get_workflow_id(
+                        game_id,
+                        session_id=session_id,
+                        game_date=_today_la(),
+                        game_mode=GameMode.DAILY,
+                    )
+                    handle = workflow_environment.client.get_workflow_handle(
+                        workflow_id
+                    )
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+
+        assert response.status_code == 200
+        assert response.cookies["game_mode"] == "daily"
+        assert state.game_mode is GameMode.DAILY
 
     async def test_play_returns_game_grid(
         self, workflow_environment: WorkflowEnvironment, task_queue: str
