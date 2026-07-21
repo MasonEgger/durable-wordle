@@ -2,6 +2,9 @@
 # guess results, and game state used by workflows and API layers.
 import enum
 from dataclasses import dataclass, field
+from datetime import datetime
+
+WORD_LENGTH: int = 5
 
 
 class LetterFeedback(enum.StrEnum):
@@ -15,6 +18,19 @@ class LetterFeedback(enum.StrEnum):
     CORRECT = "correct"
     PRESENT = "present"
     ABSENT = "absent"
+
+
+class GameMode(enum.StrEnum):
+    """Available game modes.
+
+    :cvar DAILY: Deterministic word based on the game date.
+    :cvar RANDOM: Random word selected at workflow start.
+    :cvar ABSURDLE: Adversarial mode that chooses feedback per guess.
+    """
+
+    DAILY = "daily"
+    RANDOM = "random"
+    ABSURDLE = "absurdle"
 
 
 @dataclass
@@ -36,21 +52,25 @@ class GameState:
     :param target_word: The word the player is trying to guess (uppercase).
     :param guesses: List of guess results submitted so far.
     :param max_guesses: Maximum number of guesses allowed.
-    :param status: Current game status — ``"playing"``, ``"won"``, or ``"lost"``.
+    :param status: Current game status — ``"playing"``, ``"won"``, ``"lost"``,
+        or ``"abandoned"`` (closed after an inactivity timeout).
     """
 
     target_word: str
     guesses: list[GuessResult] = field(default_factory=list)
     max_guesses: int = 6
     status: str = "playing"
+    started_at: datetime | None = None
+    game_mode: GameMode = GameMode.DAILY
+    remaining_candidates: list[str] = field(default_factory=list)
 
     @property
     def is_game_over(self) -> bool:
         """Check whether the game has ended.
 
-        :returns: ``True`` if the game status is ``"won"`` or ``"lost"``.
+        :returns: ``True`` if the game was won, lost, or abandoned.
         """
-        return self.status in ("won", "lost")
+        return self.status in ("won", "lost", "abandoned")
 
 
 @dataclass
@@ -58,11 +78,16 @@ class WorkflowInput:
     """Input for starting a new Wordle game session workflow.
 
     :param session_id: Unique session identifier for this game.
-    :param random_mode: If True, pick a random word instead of the daily word.
+    :param game_mode: Word selection and feedback mode.
+    :param game_date: ISO-format date used by daily mode.
+    :param inactivity_timeout_seconds: Optional inactivity timeout override,
+        used by tests and previews. ``None`` uses the production default.
     """
 
     session_id: str
-    random_mode: bool = False
+    game_mode: GameMode = GameMode.RANDOM
+    game_date: str = ""
+    inactivity_timeout_seconds: float | None = None
 
 
 @dataclass
@@ -106,3 +131,29 @@ class CalculateFeedbackInput:
 
     guess: str
     target: str
+
+
+@dataclass
+class AbsurdleFeedbackInput:
+    """Input for the Absurdle feedback activity.
+
+    :param guess: The guessed word (uppercase).
+    :param candidates: Candidate words still consistent with prior feedback.
+    """
+
+    guess: str
+    candidates: list[str]
+
+
+@dataclass
+class AbsurdleFeedbackResult:
+    """Result of an Absurdle feedback choice.
+
+    :param feedback: Per-letter feedback selected for this guess.
+    :param candidates: Remaining candidate words after applying feedback.
+    :param reveal_word: Deterministic word to reveal if the player loses.
+    """
+
+    feedback: list[LetterFeedback]
+    candidates: list[str]
+    reveal_word: str

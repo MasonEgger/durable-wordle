@@ -3,16 +3,25 @@
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
+
+# Close the workflow if no guess is made within this window. Keeps abandoned
+# games from lingering as RUNNING workflows (which would pin the booth display).
+INACTIVITY_TIMEOUT = timedelta(seconds=60)
 
 with workflow.unsafe.imports_passed_through():
     from durable_wordle.activities import (
         calculate_feedback,
+        choose_absurdle_feedback,
         select_word,
         validate_guess,
     )
     from durable_wordle.models import (
+        WORD_LENGTH,
+        AbsurdleFeedbackInput,
         CalculateFeedbackInput,
+        GameMode,
         GameState,
         GuessResult,
         LetterFeedback,
@@ -21,6 +30,7 @@ with workflow.unsafe.imports_passed_through():
         ValidateGuessInput,
         WorkflowInput,
     )
+    from durable_wordle.word_lists import ANSWER_LIST
 
 
 @workflow.defn
@@ -55,24 +65,66 @@ class UserSessionWorkflow:
         :param workflow_input: Contains session ID and game mode.
         :returns: The final game state when the game is over.
         """
-        game_date = (
-            "" if workflow_input.random_mode else workflow.now().date().isoformat()
-        )
-        mode_label = "random" if workflow_input.random_mode else f"daily ({game_date})"
-        workflow.logger.info("Selecting word: %s", mode_label)
-        target_word = await workflow.execute_activity(
-            select_word,
-            SelectWordInput(game_date=game_date),
-            start_to_close_timeout=timedelta(seconds=10),
-        )
-        self._game_state = GameState(target_word=target_word)
+        if workflow_input.game_mode is GameMode.ABSURDLE:
+            self._game_state = GameState(
+                target_word="",
+                started_at=workflow.now(),
+                game_mode=GameMode.ABSURDLE,
+                remaining_candidates=sorted(ANSWER_LIST),
+            )
+        else:
+            game_date = ""
+            if workflow_input.game_mode is GameMode.DAILY:
+                game_date = workflow_input.game_date
+            workflow.logger.info("Selecting word: %s", workflow_input.game_mode.value)
+            target_word = await workflow.execute_activity(
+                select_word,
+                SelectWordInput(game_date=game_date),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            self._game_state = GameState(
+                target_word=target_word,
+                started_at=workflow.now(),
+                game_mode=workflow_input.game_mode,
+            )
         workflow.logger.info(
             "Game initialized (session=%s, mode=%s)",
             workflow_input.session_id,
-            "random" if workflow_input.random_mode else "daily",
+            workflow_input.game_mode.value,
         )
+        inactivity_timeout = INACTIVITY_TIMEOUT
+        has_inactivity_timeout = True
+        if workflow_input.inactivity_timeout_seconds is not None:
+            if workflow_input.inactivity_timeout_seconds <= 0:
+                has_inactivity_timeout = False
+            else:
+                inactivity_timeout = timedelta(
+                    seconds=workflow_input.inactivity_timeout_seconds
+                )
 
-        await workflow.wait_condition(lambda: self._state.is_game_over)
+        # Wait for the game to end, resetting an inactivity timer on each guess.
+        # If no guess arrives within INACTIVITY_TIMEOUT, abandon the game so the
+        # workflow completes instead of running forever.
+        while not self._state.is_game_over:
+            guesses_before = len(self._state.guesses)
+
+            def _activity_or_game_over(before: int = guesses_before) -> bool:
+                return self._state.is_game_over or len(self._state.guesses) != before
+
+            try:
+                if has_inactivity_timeout:
+                    await workflow.wait_condition(
+                        _activity_or_game_over,
+                        timeout=inactivity_timeout,
+                    )
+                else:
+                    await workflow.wait_condition(_activity_or_game_over)
+            except TimeoutError:
+                self._state.status = "abandoned"
+                workflow.logger.info(
+                    "Game abandoned after %s of inactivity", inactivity_timeout
+                )
+                break
 
         # Ensure all in-flight update handlers finish before completing
         await workflow.wait_condition(workflow.all_handlers_finished)
@@ -96,7 +148,7 @@ class UserSessionWorkflow:
         :raises ApplicationError: If the game is over, guess is invalid format,
             or word is not in the dictionary.
         """
-        # Wait for the select_daily_word activity to finish initializing state
+        # Wait for the select_word activity to finish initializing state
         await workflow.wait_condition(lambda: self._game_state is not None)
 
         normalized_guess = guess_input.guess.strip().upper()
@@ -113,6 +165,7 @@ class UserSessionWorkflow:
             validate_guess,
             ValidateGuessInput(guess=normalized_guess),
             start_to_close_timeout=timedelta(seconds=10),
+            retry_policy=RetryPolicy(maximum_attempts=1),
         )
         if not is_valid:
             workflow.logger.warning("Rejected invalid word: %s", normalized_guess)
@@ -121,14 +174,30 @@ class UserSessionWorkflow:
                 type="InvalidWord",
             )
 
-        # Calculate letter feedback via activity for event history visibility
-        feedback = await workflow.execute_activity(
-            calculate_feedback,
-            CalculateFeedbackInput(
-                guess=normalized_guess, target=self._state.target_word
-            ),
-            start_to_close_timeout=timedelta(seconds=10),
-        )
+        if self._state.game_mode is GameMode.ABSURDLE:
+            absurdle_result = await workflow.execute_activity(
+                choose_absurdle_feedback,
+                AbsurdleFeedbackInput(
+                    guess=normalized_guess,
+                    candidates=self._state.remaining_candidates,
+                ),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            feedback = absurdle_result.feedback
+            self._state.remaining_candidates = absurdle_result.candidates
+            if all(letter == LetterFeedback.CORRECT for letter in feedback):
+                self._state.target_word = normalized_guess
+            else:
+                self._state.target_word = absurdle_result.reveal_word
+        else:
+            # Calculate letter feedback via activity for event history visibility
+            feedback = await workflow.execute_activity(
+                calculate_feedback,
+                CalculateFeedbackInput(
+                    guess=normalized_guess, target=self._state.target_word
+                ),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
 
         # Build result and update state
         guess_result = GuessResult(word=normalized_guess, feedback=feedback)
@@ -166,7 +235,7 @@ class UserSessionWorkflow:
             )
 
         normalized_guess = guess_input.guess.strip().upper()
-        if len(normalized_guess) != 5:
+        if len(normalized_guess) != WORD_LENGTH:
             raise ApplicationError(
                 f"Guess must be exactly 5 letters, got {len(normalized_guess)}",
                 type="InvalidFormat",

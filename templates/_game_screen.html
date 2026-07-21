@@ -1,0 +1,28 @@
+<div id="game-screen" class="screen-enter">
+
+    {% if show_game_timers %}
+    <input type="hidden" id="started-at-ts" value="{{ started_at_ts }}">
+
+    <div class="game-timers" aria-live="off">
+        <div class="timer-card">
+            <span class="timer-label">Elapsed</span>
+            <span id="timer-area" class="timer-value" aria-label="Elapsed time">
+                00:00:00
+            </span>
+        </div>
+
+        <div id="countdown-area"
+             class="timer-card timer-card--center countdown-card"
+             data-total-seconds="60"
+             aria-label="Time remaining">
+            <span class="timer-label">Remaining</span>
+            <span id="countdown-value" class="timer-value">1:00</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <div id="game-content">
+        {% include "_board_partial.html" %}
+    </div>
+
+</div>

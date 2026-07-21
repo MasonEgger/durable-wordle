@@ -8,14 +8,21 @@ import requests
 from temporalio import activity
 
 from durable_wordle.models import (
+    AbsurdleFeedbackInput,
+    AbsurdleFeedbackResult,
     CalculateFeedbackInput,
     LetterFeedback,
     SelectWordInput,
     ValidateGuessInput,
 )
-from durable_wordle.word_lists import ANSWER_LIST, get_daily_word
+from durable_wordle.word_lists import ANSWER_LIST, get_daily_word, is_valid_guess
 
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en"
+FEEDBACK_RANK: dict[LetterFeedback, int] = {
+    LetterFeedback.ABSENT: 0,
+    LetterFeedback.PRESENT: 1,
+    LetterFeedback.CORRECT: 2,
+}
 
 
 @activity.defn
@@ -29,15 +36,26 @@ def validate_guess(activity_input: ValidateGuessInput) -> bool:
     :param activity_input: The activity input containing the guess word.
     :returns: ``True`` if the guess is a real English word.
     """
-    normalized = activity_input.guess.strip().upper()
-    response = requests.get(
-        f"{DICTIONARY_API_URL}/{normalized.lower()}",
-        timeout=5,
-    )
+    # Workflow normalizes before calling; the input is already uppercase.
+    word = activity_input.guess
+    # Fast path: skip the external API for words in our curated lists.
+    if is_valid_guess(word):
+        activity.logger.info("validate_guess: %s → valid (local list)", word)
+        return True
+    try:
+        response = requests.get(
+            f"{DICTIONARY_API_URL}/{word.lower()}",
+            timeout=2,
+        )
+    except requests.RequestException as err:
+        activity.logger.warning(
+            "validate_guess: %s → dictionary lookup failed: %s", word, err
+        )
+        return False
     is_valid: bool = response.status_code == 200
     activity.logger.info(
         "validate_guess: %s → %s (status=%d)",
-        normalized,
+        word,
         "valid" if is_valid else "invalid",
         response.status_code,
     )
@@ -81,36 +99,109 @@ def calculate_feedback(
     :param activity_input: Contains the guess and target words.
     :returns: A list of per-letter feedback values.
     """
-    normalized_guess = activity_input.guess.upper()
-    normalized_target = activity_input.target.upper()
-    word_length = len(normalized_guess)
+    feedback = _calculate_feedback(activity_input.guess, activity_input.target)
 
-    feedback: list[LetterFeedback] = [LetterFeedback.ABSENT] * word_length
-    remaining_counts: Counter[str] = Counter(normalized_target)
-
-    # First pass: mark exact matches (CORRECT) and decrement their counts
-    for position in range(word_length):
-        guess_letter = normalized_guess[position]
-        target_letter = normalized_target[position]
-        if guess_letter == target_letter:
-            feedback[position] = LetterFeedback.CORRECT
-            remaining_counts[guess_letter] -= 1
-
-    # Second pass: mark PRESENT for non-exact positions with remaining letters
-    for position in range(word_length):
-        if feedback[position] is LetterFeedback.CORRECT:
-            continue
-        guess_letter = normalized_guess[position]
-        if remaining_counts[guess_letter] > 0:
-            feedback[position] = LetterFeedback.PRESENT
-            remaining_counts[guess_letter] -= 1
-
-    result = feedback
-    feedback_summary = "".join(fb.value[0].upper() for fb in result)
+    feedback_summary = "".join(
+        feedback_item.value[0].upper() for feedback_item in feedback
+    )
     activity.logger.info(
         "calculate_feedback: %s vs %s → %s",
-        normalized_guess,
-        normalized_target,
+        activity_input.guess.upper(),
+        activity_input.target.upper(),
         feedback_summary,
     )
-    return result
+    return feedback
+
+
+@activity.defn
+def choose_absurdle_feedback(
+    activity_input: AbsurdleFeedbackInput,
+) -> AbsurdleFeedbackResult:
+    """Choose adversarial Absurdle feedback for a guess.
+
+    Candidate words are partitioned by the feedback they would produce. The
+    activity chooses the partition that leaves the most possible answers, with
+    deterministic tie-breakers that prefer less helpful feedback.
+
+    :param activity_input: Contains the guess and current candidate list.
+    :returns: Selected feedback, remaining candidates, and a reveal word.
+    """
+    guess = activity_input.guess.upper()
+    candidate_words = sorted(
+        {candidate.upper() for candidate in activity_input.candidates}
+    )
+    if not candidate_words:
+        return AbsurdleFeedbackResult(
+            feedback=[LetterFeedback.ABSENT] * len(guess),
+            candidates=[],
+            reveal_word=guess,
+        )
+
+    partitions: dict[tuple[LetterFeedback, ...], list[str]] = {}
+    for candidate_word in candidate_words:
+        feedback = tuple(_calculate_feedback(guess, candidate_word))
+        partitions.setdefault(feedback, []).append(candidate_word)
+
+    selected_feedback, selected_candidates = max(
+        partitions.items(),
+        key=lambda partition: _absurdle_partition_key(
+            partition[0],
+            partition[1],
+        ),
+    )
+    reveal_word = selected_candidates[0]
+    feedback_summary = "".join(
+        feedback_item.value[0].upper() for feedback_item in selected_feedback
+    )
+    activity.logger.info(
+        "choose_absurdle_feedback: %s → %s (%d candidates)",
+        guess,
+        feedback_summary,
+        len(selected_candidates),
+    )
+    return AbsurdleFeedbackResult(
+        feedback=list(selected_feedback),
+        candidates=selected_candidates,
+        reveal_word=reveal_word,
+    )
+
+
+def _calculate_feedback(guess_input: str, target_input: str) -> list[LetterFeedback]:
+    guess = guess_input.upper()
+    target = target_input.upper()
+
+    feedback: list[LetterFeedback] = [LetterFeedback.ABSENT] * len(guess)
+    remaining_counts: Counter[str] = Counter(target)
+
+    # First pass: mark exact matches (CORRECT) and decrement their counts
+    for position in range(len(guess)):
+        if guess[position] == target[position]:
+            feedback[position] = LetterFeedback.CORRECT
+            remaining_counts[guess[position]] -= 1
+
+    # Second pass: mark PRESENT for non-exact positions with remaining letters
+    for position in range(len(guess)):
+        if feedback[position] is LetterFeedback.CORRECT:
+            continue
+        if remaining_counts[guess[position]] > 0:
+            feedback[position] = LetterFeedback.PRESENT
+            remaining_counts[guess[position]] -= 1
+
+    return feedback
+
+
+def _absurdle_partition_key(
+    feedback: tuple[LetterFeedback, ...],
+    candidates: list[str],
+) -> tuple[int, int, int, tuple[int, ...]]:
+    correct_count = feedback.count(LetterFeedback.CORRECT)
+    present_count = feedback.count(LetterFeedback.PRESENT)
+    feedback_pattern_key = tuple(
+        -FEEDBACK_RANK[feedback_item] for feedback_item in feedback
+    )
+    return (
+        len(candidates),
+        -correct_count,
+        -present_count,
+        feedback_pattern_key,
+    )

@@ -4,276 +4,801 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Durable Wordle</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    <script>
-    tailwind.config = {
-        theme: {
-            extend: {
-                colors: {
-                    'temporal-uv': '#444CE7',
-                    'temporal-black': '#141414',
-                    'temporal-white': '#F8FAFC',
-                }
-            }
-        }
-    }
-    </script>
-    <style>
-        body {
-            background:
-                radial-gradient(ellipse at 20% 0%, rgba(68, 76, 231, 0.25) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 100%, rgba(99, 56, 204, 0.18) 0%, transparent 50%),
-                #141414;
-        }
-        .grid-bg {
-            background-image:
-                linear-gradient(rgba(68, 76, 231, 0.07) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(68, 76, 231, 0.07) 1px, transparent 1px);
-            background-size: 40px 40px;
-        }
-        .glow-uv {
-            box-shadow: 0 0 20px rgba(68, 76, 231, 0.3), 0 0 60px rgba(68, 76, 231, 0.1);
-        }
-        .tile-reveal {
-            animation: reveal 0.5s ease-in-out both;
-        }
-        @keyframes reveal {
-            0% { transform: rotateX(0deg); }
-            50% { transform: rotateX(90deg); }
-            100% { transform: rotateX(0deg); }
-        }
-        .tile-pop { animation: pop 0.1s ease-in-out; }
-        @keyframes pop {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); }
-        }
-        .shake { animation: shake 0.5s ease-in-out; }
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
-            20%, 40%, 60%, 80% { transform: translateX(4px); }
-        }
-    </style>
+    <link rel="icon" href="/static/mascot.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/tailwind.css">
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/htmx.min.js"></script>
 </head>
-<body class="text-temporal-white min-h-screen flex flex-col items-center grid-bg">
-    <header class="w-full max-w-lg border-b border-gray-700/50 py-4 flex items-center justify-center gap-3">
-        <img src="/static/ziggy.png" alt="Ziggy" class="w-10 h-10 drop-shadow-lg">
-        <div class="text-center">
-            <h1 class="text-3xl font-bold tracking-wide bg-gradient-to-r from-temporal-white to-gray-400 bg-clip-text text-transparent">Durable Wordle</h1>
-            <p class="text-xs text-gray-500 mt-0.5">Powered by <a href="https://temporal.io" target="_blank" rel="noopener" class="text-temporal-uv font-semibold hover:underline hover:brightness-125 transition-all">Temporal</a></p>
-        </div>
+<body class="app-body">
+
+    <header class="app-header">
+        <h1 id="main-title" class="app-title font-mono font-bold {{ 'text-temporal-grellow' if screen_state == 'start' else 'text-white' }}">Durable Wordle</h1>
+        <p class="brand-line text-temporal-indigo">
+            POWERED BY
+            <svg viewBox="404 395 1568 410" fill="none" xmlns="http://www.w3.org/2000/svg" class="brand-logo" aria-label="Temporal"><path d="M915 519V538.047H970.006V684.703H990.72V538.047H1045.73V519H915Z" fill="currentColor"/><path d="M1050.01 624.95C1050.01 661.132 1073.82 686.131 1110.25 686.131C1137.38 686.131 1159.3 669.235 1164.06 644.95H1144.3C1140.25 660.663 1125 668.751 1108.82 668.751C1086.2 668.751 1071.2 653.037 1070.48 630.426V628.759H1164.77C1165.01 625.902 1165.24 623.045 1165.24 620.426C1164.29 584.475 1140.95 562.809 1107.63 562.809C1073.34 562.809 1050.01 587.57 1050.01 624.95ZM1071.67 612.569C1073.58 592.808 1090.01 579.951 1107.86 579.951C1127.14 579.951 1142.39 591.617 1144.29 612.569H1071.67Z" fill="currentColor"/><path d="M1335.55 562.809C1313.88 562.809 1300.79 572.808 1293.41 585.903C1286.5 570.427 1271.98 562.809 1255.07 562.809C1236.26 562.809 1226.03 572.094 1219.6 580.903L1217.94 564.237H1200.07V684.703H1219.6V621.617C1219.6 597.332 1231.74 580.665 1251.74 580.665C1270.31 580.665 1281.03 593.046 1281.03 616.855V684.703H1300.55V620.664C1300.55 595.903 1312.93 580.665 1333.17 580.665C1351.5 580.665 1361.98 593.046 1361.98 616.855V684.703H1381.5V615.664C1381.5 577.332 1360.79 562.809 1335.55 562.809Z" fill="currentColor"/><path d="M1478.41 562.809C1457.93 562.809 1444.84 572.57 1436.74 583.76L1435.08 564.237H1417.22V732.321H1436.74V666.132C1444.12 677.798 1457.93 686.131 1478.41 686.131C1511.02 686.131 1536.74 661.132 1536.74 624.95C1536.74 585.427 1511.02 562.809 1478.41 562.809ZM1476.5 668.751C1452.69 668.751 1436.5 650.18 1436.5 624.474C1436.5 598.522 1452.69 580.189 1476.5 580.189C1499.59 580.189 1516.74 598.522 1516.74 624.95C1516.74 650.418 1499.59 668.751 1476.5 668.751Z" fill="currentColor"/><path d="M1624.65 686.131C1660.13 686.131 1684.89 660.894 1684.89 624.95C1684.89 588.046 1660.13 562.809 1624.65 562.809C1589.18 562.809 1564.41 588.046 1564.41 624.95C1564.41 660.894 1589.18 686.131 1624.65 686.131ZM1624.65 668.751C1600.6 668.751 1584.41 649.942 1584.41 624.95C1584.41 598.998 1600.6 580.189 1624.65 580.189C1648.7 580.189 1664.89 598.998 1664.89 624.95C1664.89 649.942 1648.7 668.751 1624.65 668.751Z" fill="currentColor"/><path d="M1773.12 564.237C1751.45 564.237 1740.24 573.284 1734.53 582.57L1732.87 564.237H1715.01V684.703H1734.53V623.759C1734.53 604.474 1743.35 583.284 1768.83 583.284H1778.59V564.237H1773.12Z" fill="currentColor"/><path d="M1908.98 665.886C1903.98 665.886 1900.88 663.989 1900.88 658.037V606.617C1900.88 578.284 1883.99 562.809 1853.03 562.809C1823.75 562.809 1804.46 576.856 1801.61 600.665H1821.13C1823.51 588.284 1834.94 580.189 1852.08 580.189C1871.13 580.189 1881.36 589.713 1881.36 605.427V613.76H1846.61C1814.7 613.76 1797.8 626.371 1797.8 650.656C1797.8 672.798 1815.89 686.131 1842.56 686.131C1863.51 686.131 1874.69 676.846 1882.31 665.894C1882.55 677.798 1888.03 684.703 1904.22 684.703H1914.93V665.886H1908.98ZM1881.36 635.18C1881.36 655.418 1868.27 669.465 1843.99 669.465C1827.8 669.465 1817.56 661.37 1817.56 649.466C1817.56 635.656 1827.32 630.188 1844.7 630.188H1881.36V635.18Z" fill="currentColor"/><path d="M1942.63 519V684.703H1962.15V519H1942.63Z" fill="currentColor"/><path d="M677.375 531.625C668.152 462.648 644.892 405 609 405C573.208 405 549.848 462.648 540.625 531.625C471.648 540.848 414 564.108 414 600C414 635.792 471.648 659.152 540.625 668.375C549.848 737.352 573.108 795 609 795C644.792 795 668.152 737.352 677.375 668.375C746.352 659.152 804 635.892 804 600C804 564.108 746.352 540.748 677.375 531.625ZM538.419 648.123C472.35 638.599 433.751 616.743 433.751 599.9C433.751 583.057 472.249 561.201 538.419 551.676C536.915 567.617 536.213 583.859 536.213 599.9C536.213 615.941 536.915 632.283 538.419 648.123ZM609 424.65C625.843 424.65 647.699 463.149 657.224 529.319C641.283 527.815 625.041 527.113 609 527.113C592.959 527.113 576.717 527.915 560.776 529.319C570.301 463.249 592.157 424.65 609 424.65ZM679.581 648.123C676.373 648.625 662.938 650.129 659.63 650.53C659.329 653.938 657.725 667.272 657.224 670.481C647.699 736.55 625.843 775.149 609 775.149C592.157 775.149 570.301 736.65 560.776 670.481C560.275 667.272 558.771 653.838 558.37 650.53C556.866 634.889 555.864 618.046 555.864 599.9C555.864 581.753 556.766 565.01 558.37 549.27C574.01 547.766 590.853 546.763 609 546.763C627.147 546.763 643.889 547.666 659.63 549.27C663.039 549.571 676.373 551.175 679.581 551.676C745.65 561.201 784.249 583.057 784.249 599.9C784.249 616.743 745.65 638.599 679.581 648.123Z" fill="currentColor"/></svg>
+        </p>
+        <div class="header-divider"></div>
     </header>
 
-    <main id="game-content" class="flex-1 flex flex-col items-center w-full max-w-lg px-4 py-4 gap-4">
-        {% include "_board_partial.html" %}
+    <main id="screen" class="screen-root">
+        {% include current_screen_template %}
     </main>
 
     <script>
-    function shareResults() {
-        const emojiMap = {
-            'bg-green-500': '🟩',
-            'bg-yellow-500': '🟨',
-            'bg-gray-500': '⬛'
-        };
-        const rows = document.querySelectorAll('#game-board .guess-row');
-        let result = 'Durable Wordle\n\n';
-        let hasGuesses = false;
-        rows.forEach(function(row) {
-            const tiles = row.querySelectorAll('div[class*="bg-green"], div[class*="bg-yellow"], div[class*="bg-gray-500"]');
-            if (tiles.length > 0) {
-                hasGuesses = true;
-                tiles.forEach(function(tile) {
-                    const classes = tile.className;
-                    if (classes.includes('bg-green-500')) result += emojiMap['bg-green-500'];
-                    else if (classes.includes('bg-yellow-500')) result += emojiMap['bg-yellow-500'];
-                    else if (classes.includes('bg-gray-500')) result += emojiMap['bg-gray-500'];
-                });
-                result += '\n';
-            }
-        });
-        if (hasGuesses) {
-            navigator.clipboard.writeText(result.trim()).then(function() {
-                document.getElementById('share-confirmation').classList.remove('hidden');
-                setTimeout(function() {
-                    document.getElementById('share-confirmation').classList.add('hidden');
-                }, 2000);
-            });
+    // ── Timing constants ───────────────────────────────────────────────────────
+    var TILE_FLIP_MS = 300;      // delay between consecutive tile flips
+    var TILE_COLOR_OFFSET = 250; // ms into a flip when the color swaps (mid-flip)
+    var SHAKE_DURATION_MS = 500; // shake animation duration
+    var ERROR_DISMISS_MS = 2000; // auto-dismiss for error overlays
+    var MADLIB_CYCLE_MS = 3000;  // interval between madlib phrase swaps
+    var MADLIB_FADE_MS = 300;    // fade-out duration before swapping text
+    var AUTO_SHARE_AFTER_REVEAL_MS = 350; // pause after final tile before selfie
+    var INACTIVITY_SECONDS = 60;
+    var START_IDLE_DELAY_MS = 10000; // start-screen attract animation delay
+    var IDLE_DEMO_TYPE_MS = 120;
+    var IDLE_DEMO_ROW_MS = 2200;
+    var IDLE_DEMO_REVEAL_AFTER_MS = 760;
+    var IDLE_DEMO_RESTART_PAUSE_MS = 1800;
+    var MAX_LENGTH = 5;
+    var IDLE_DEMO_SEQUENCES = [
+        {"target": "PLANT", "guesses": ["ALERT", "SLANT", "PLANT"]},
+        {"target": "BRAVE", "guesses": ["STARE", "CRANE", "GRAPE", "BRAVE"]},
+        {"target": "CHIME", "guesses": ["MIGHT", "CLING", "CHIDE", "CHIME"]},
+        {"target": "TIMER", "guesses": ["CRANE", "BLUSH", "MIGHT", "TILER", "TIMER"]},
+        {
+            "target": "SPARK",
+            "guesses": ["TRACE", "CRISP", "PARKS", "SHARK", "SPARE", "SPARK"]
+        }
+    ];
+    var IDLE_DEMO_FEEDBACK_CLASS = {
+        correct: 'bg-green-500 border-green-500',
+        present: 'bg-amber-500 border-amber-500',
+        absent: 'bg-wordle-absent border-wordle-absent'
+    };
+
+    // ── Header color + title text ──────────────────────────────────────────────
+    function updateHeaderColor(toScreen) {
+        var title = document.getElementById('main-title');
+        if (!title) return;
+        if (toScreen === 'start' || toScreen === 'leaderboard') {
+            title.classList.remove('text-white');
+            title.classList.add('text-temporal-grellow');
+        } else {
+            title.classList.remove('text-temporal-grellow');
+            title.classList.add('text-white');
+        }
+        if (toScreen === 'leaderboard') {
+            title.textContent = 'Durable Wordle Leaderboard';
+            title.classList.add('is-compact');
+        } else {
+            title.textContent = 'Durable Wordle';
+            title.classList.remove('is-compact');
         }
     }
 
-    // Current guess state
-    let currentGuess = '';
-    const MAX_LENGTH = 5;
+    // ── Madlib cycling ─────────────────────────────────────────────────────────
+    var madlibInterval = null;
+
+    function initMadlibCycle() {
+        if (madlibInterval) { clearInterval(madlibInterval); madlibInterval = null; }
+        var screen = document.getElementById('leaderboard-screen');
+        if (!screen) return;
+        var raw = screen.getAttribute('data-madlibs');
+        if (!raw) return;
+        var madlibs;
+        try { madlibs = JSON.parse(raw); } catch(e) { return; }
+        if (!madlibs || madlibs.length < 2) return;
+
+        var nounEl = document.getElementById('madlib-noun-chip');
+        var verbEl = document.getElementById('madlib-verb-chip');
+        var areaEl = document.getElementById('madlib-area');
+        if (!nounEl || !verbEl || !areaEl) return;
+
+        var idx = 0;
+        madlibInterval = setInterval(function() {
+            areaEl.style.opacity = '0';
+            setTimeout(function() {
+                idx = (idx + 1) % madlibs.length;
+                nounEl.textContent = madlibs[idx][0];
+                verbEl.textContent = madlibs[idx][1];
+                areaEl.style.opacity = '1';
+            }, MADLIB_FADE_MS);
+        }, MADLIB_CYCLE_MS);
+    }
+
+    // Init on full-page load if leaderboard is present
+    initMadlibCycle();
+
+    // ── Timer ──────────────────────────────────────────────────────────────────
+    var timerInterval = null;
+
+    function formatElapsed(seconds) {
+        var h = Math.floor(seconds / 3600);
+        var m = Math.floor((seconds % 3600) / 60);
+        var s = seconds % 60;
+        return [h, m, s].map(function(v) { return String(v).padStart(2, '0'); }).join(':');
+    }
+
+    function startTimer(fromTs) {
+        if (timerInterval) clearInterval(timerInterval);
+        function tick() {
+            var el = document.getElementById('timer-area');
+            if (!el) { clearInterval(timerInterval); timerInterval = null; return; }
+            var elapsed = Math.max(0, Math.floor(Date.now() / 1000 - fromTs));
+            el.textContent = formatElapsed(elapsed);
+        }
+        tick();
+        timerInterval = setInterval(tick, 1000);
+    }
+
+    function stopTimer() {
+        if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    }
+
+    function initTimerFromScreen() {
+        var tsInput = document.getElementById('started-at-ts');
+        if (tsInput) {
+            var ts = parseInt(tsInput.value, 10);
+            if (ts > 0) startTimer(ts);
+        }
+    }
+
+    // ── Inactivity countdown (mirrors the workflow's 60s timeout) ────────────────
+    var countdownInterval = null;
+    var countdownEnd = 0;
+    var countdownTimedOut = false;
+
+    function applyCountdownVisualState(remaining) {
+        var screen = document.getElementById('game-screen');
+        var area = document.getElementById('countdown-area');
+        if (!screen || !area) return;
+        var total = parseInt(area.dataset.totalSeconds || String(INACTIVITY_SECONDS), 10);
+        var boundedRemaining = Math.max(0, Math.min(total, remaining));
+        var urgency = total > 0 ? 1 - (boundedRemaining / total) : 1;
+        var scale = 1 + urgency * 0.55;
+        screen.style.setProperty('--countdown-urgency', urgency.toFixed(3));
+        screen.style.setProperty('--countdown-scale', scale.toFixed(3));
+        area.classList.toggle('urgent', boundedRemaining <= 20 && boundedRemaining > 10);
+        area.classList.toggle('critical', boundedRemaining <= 10);
+    }
+
+    function showCountdownZero() {
+        var area = document.getElementById('countdown-area');
+        var el = document.getElementById('countdown-value');
+        if (area) area.style.display = '';
+        if (!el) return;
+        el.textContent = '0:00';
+        el.classList.add('text-red-400');
+        el.classList.remove('text-temporal-grellow');
+        applyCountdownVisualState(0);
+    }
+
+    function countdownTick() {
+        var el = document.getElementById('countdown-value');
+        if (!el) { stopCountdown(); return; }
+        var remaining = Math.max(0, Math.round((countdownEnd - Date.now()) / 1000));
+        el.textContent = Math.floor(remaining / 60) + ':' + String(remaining % 60).padStart(2, '0');
+        el.classList.toggle('text-red-400', remaining <= 10);
+        el.classList.toggle('text-temporal-grellow', remaining > 10);
+        applyCountdownVisualState(remaining);
+        if (remaining <= 0) {
+            countdownTimedOut = true;
+            stopCountdown();
+            showCountdownZero();
+            revealOnTimeout();
+        }
+    }
+
+    function startCountdown() {
+        stopCountdown();
+        var area = document.getElementById('countdown-area');
+        if (!area) return;
+        if (countdownTimedOut) {
+            showCountdownZero();
+            return;
+        }
+        if (!document.getElementById('guess-form')) {  // game over — hide it
+            if (area) area.style.display = 'none';
+            return;
+        }
+        if (area) area.style.display = '';
+        applyCountdownVisualState(INACTIVITY_SECONDS);
+        countdownEnd = Date.now() + INACTIVITY_SECONDS * 1000;
+        countdownTick();
+        countdownInterval = setInterval(countdownTick, 250);
+    }
+
+    function stopCountdown() {
+        if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    }
+
+    // On timeout the workflow abandons; fetch the revealed board (retry until the
+    // server has finished abandoning and the endgame actions appear).
+    function revealOnTimeout() {
+        var tries = 0;
+        countdownTimedOut = true;
+        showCountdownZero();
+        (function attempt() {
+            tries++;
+            htmx.ajax('GET', '/board', { target: '#game-content', swap: 'innerHTML' })
+                .then(function () {
+                    if (!document.getElementById('endgame-actions') && tries < 6) {
+                        setTimeout(attempt, 1500);
+                    }
+                });
+        })();
+    }
+
+    // Init timer on full-page load if game screen is present
+    initTimerFromScreen();
+    startCountdown();
+
+    // Init leaderboard on full-page load if leaderboard screen is present
+    if (document.getElementById('leaderboard-screen')) {
+        updateHeaderColor('leaderboard');
+        initMadlibCycle();
+    }
+
+    // ── Keyboard input ─────────────────────────────────────────────────────────
+    var currentGuess = '';
+    var guessInFlight = false;
+    var startInFlight = false;
+    var startIdleTimer = null;
+    var startIdleDemoVisible = false;
+    var startIdleDemoAnimationTimer = null;
+    var startIdleDemoTimeouts = [];
+    var startIdleDemoSequenceOrder = [];
+    var startIdleDemoLastSequenceIndex = -1;
 
     function getCurrentTiles() {
         return document.querySelectorAll('.current-tile');
     }
 
     function updateTiles() {
-        const tiles = getCurrentTiles();
+        var tiles = getCurrentTiles();
         tiles.forEach(function(tile, index) {
-            const letter = currentGuess[index] || '';
+            var letter = currentGuess[index] || '';
             tile.textContent = letter;
-            if (letter) {
-                tile.classList.remove('border-gray-600');
-                tile.classList.add('border-gray-400');
-            } else {
-                tile.classList.remove('border-gray-400');
-                tile.classList.add('border-gray-600');
-            }
+            // Border brightens when a letter is entered, dims when empty
+            tile.classList.toggle('border-white/60', !!letter);
+            tile.classList.toggle('border-wordle-tile-active', !letter);
         });
-        // Update hidden input
-        const input = document.getElementById('guess-input');
-        if (input) {
-            input.value = currentGuess;
-        }
+        var input = document.getElementById('guess-input');
+        if (input) input.value = currentGuess;
     }
 
     function addLetter(letter) {
+        if (guessInFlight) return;
         if (currentGuess.length >= MAX_LENGTH) return;
         currentGuess += letter.toUpperCase();
         updateTiles();
-        // Pop animation on the tile that just got a letter
-        const tiles = getCurrentTiles();
-        const tile = tiles[currentGuess.length - 1];
+        var tiles = getCurrentTiles();
+        var tile = tiles[currentGuess.length - 1];
         if (tile) {
             tile.classList.add('tile-pop');
-            setTimeout(function() { tile.classList.remove('tile-pop'); }, 100);
+            setTimeout(function() { tile.classList.remove('tile-pop'); }, 100); // matches .tile-pop CSS
         }
     }
 
     function removeLetter() {
+        if (guessInFlight) return;
         if (currentGuess.length === 0) return;
         currentGuess = currentGuess.slice(0, -1);
         updateTiles();
     }
 
+    function setGuessInFlight(nextValue) {
+        guessInFlight = nextValue;
+        document.querySelectorAll('.keyboard-key[data-action="enter"]').forEach(function(button) {
+            button.disabled = nextValue;
+            button.classList.toggle('opacity-50', nextValue);
+        });
+    }
+
     function submitGuess() {
+        if (guessInFlight) return;
         if (currentGuess.length !== MAX_LENGTH) {
-            // Shake the current row
-            const row = document.getElementById('current-row');
+            var row = document.getElementById('current-row');
             if (row) {
                 row.classList.add('shake');
-                setTimeout(function() { row.classList.remove('shake'); }, 500);
+                setTimeout(function() { row.classList.remove('shake'); }, SHAKE_DURATION_MS);
             }
             return;
         }
-        const form = document.getElementById('guess-form');
-        if (form) {
-            // Don't clear currentGuess yet — wait for successful swap
-            htmx.trigger(form, 'submit');
+        // Post the guess explicitly. htmx.trigger(form, 'submit') fires a
+        // synthetic submit that HTMX 2.x does NOT serialize, so the `guess`
+        // field was missing. Build values from the real form so game_mode
+        // radio buttons are submitted with keyboard and on-screen Enter.
+        var form = document.getElementById('guess-form');
+        if (!form) return;
+        var values = {};
+        new FormData(form).forEach(function(value, key) {
+            values[key] = value;
+        });
+        values.guess = currentGuess;
+        setGuessInFlight(true);
+        htmx.ajax('POST', '/guess', {
+            target: '#game-content',
+            swap: 'innerHTML',
+            values: values
+        });
+    }
+
+    function submitStartForm(form) {
+        if (startInFlight) return;
+        if (!form.reportValidity()) return;
+
+        stopStartIdleDemo();
+
+        var values = {};
+        new FormData(form).forEach(function(value, key) {
+            values[key] = value;
+        });
+
+        startInFlight = true;
+        var playButton = form.querySelector('button[type="submit"]');
+        if (playButton) playButton.disabled = true;
+
+        htmx.ajax('POST', '/play', {
+            target: '#screen',
+            swap: 'innerHTML',
+            values: values
+        }).catch(function() {
+            startInFlight = false;
+            if (playButton) playButton.disabled = false;
+        });
+    }
+
+    function getStartScreen() {
+        return document.getElementById('start-screen');
+    }
+
+    function setStartIdleDemoVisible(nextValue) {
+        var screen = getStartScreen();
+        startIdleDemoVisible = nextValue;
+        if (!screen) return;
+        screen.classList.toggle('start-screen--idle-demo', nextValue);
+        screen.setAttribute('data-idle-demo-visible', nextValue ? 'true' : 'false');
+        if (nextValue) startStartIdleDemoAnimation();
+        else stopStartIdleDemoAnimation();
+    }
+
+    function stopStartIdleTimer() {
+        if (startIdleTimer) {
+            clearTimeout(startIdleTimer);
+            startIdleTimer = null;
         }
     }
 
-    // On-screen keyboard clicks
-    document.addEventListener('click', function(event) {
-        const target = event.target.closest('.keyboard-key');
-        if (!target) return;
+    function stopStartIdleDemo() {
+        stopStartIdleTimer();
+        setStartIdleDemoVisible(false);
+    }
 
-        if (target.dataset.action === 'enter') {
-            submitGuess();
-        } else if (target.dataset.action === 'backspace') {
-            removeLetter();
-        } else if (target.dataset.key) {
-            addLetter(target.dataset.key);
+    function scheduleStartIdleDemo() {
+        stopStartIdleTimer();
+        if (!getStartScreen()) {
+            setStartIdleDemoVisible(false);
+            return;
         }
-    });
+        startIdleTimer = setTimeout(function() {
+            if (!getStartScreen()) return;
+            setStartIdleDemoVisible(true);
+        }, START_IDLE_DELAY_MS);
+    }
 
-    // Physical keyboard support
-    document.addEventListener('keydown', function(event) {
-        // Don't capture if user is in a visible text input
-        if (event.target.tagName === 'TEXTAREA') return;
-        if (event.target.tagName === 'INPUT' && event.target.type === 'text') return;
-        if (event.ctrlKey || event.metaKey || event.altKey) return;
+    function initStartIdleDemo() {
+        setStartIdleDemoVisible(false);
+        scheduleStartIdleDemo();
+    }
 
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            submitGuess();
-        } else if (event.key === 'Backspace') {
-            event.preventDefault();
-            removeLetter();
-        } else if (/^[a-zA-Z]$/.test(event.key)) {
-            event.preventDefault();
-            addLetter(event.key);
+    function focusFirstStartInput() {
+        var firstInput = document.querySelector('#start-form input[name="first_name"]');
+        if (firstInput) firstInput.focus();
+    }
+
+    function clearStartIdleDemoTimeouts() {
+        startIdleDemoTimeouts.forEach(function(timeoutId) {
+            clearTimeout(timeoutId);
+        });
+        startIdleDemoTimeouts = [];
+        if (startIdleDemoAnimationTimer) {
+            clearTimeout(startIdleDemoAnimationTimer);
+            startIdleDemoAnimationTimer = null;
         }
-    });
+    }
 
-    // After HTMX swap: reset guess state and animate tile reveals
-    document.body.addEventListener('htmx:afterSwap', function() {
-        currentGuess = '';
+    function scheduleStartIdleDemoAnimation(callback, delayMs) {
+        var timeoutId = setTimeout(callback, delayMs);
+        startIdleDemoTimeouts.push(timeoutId);
+    }
 
-        // Animate tile-reveal: apply color at the midpoint of each flip
-        document.querySelectorAll('.tile-reveal').forEach(function(tile) {
-            var colorClass = tile.dataset.color;
-            // Parse the delay from the inline style (e.g., "300ms")
-            var delayMs = parseInt(tile.style.animationDelay) || 0;
-            // Apply color at midpoint of the 500ms flip (250ms after delay)
-            setTimeout(function() {
-                tile.className = tile.className
-                    .replace('border-gray-600/50', '')
-                    .replace('border-gray-600', '')
-                    .replace('bg-gray-800/60', '')
-                    .replace('bg-gray-800', '');
-                colorClass.split(' ').forEach(function(cls) {
-                    tile.classList.add(cls);
-                });
-            }, delayMs + 250);
+    function resetStartIdleDemoBoard() {
+        document.querySelectorAll('#start-idle-demo .wordle-tile').forEach(function(tile) {
+            tile.textContent = '';
+            tile.removeAttribute('data-demo-letter');
+            tile.removeAttribute('data-color');
+            tile.classList.remove(
+                'tile-pop',
+                'tile-reveal',
+                'current-tile',
+                'border-wordle-tile-active',
+                'bg-green-500',
+                'border-green-500',
+                'bg-amber-500',
+                'border-amber-500',
+                'bg-wordle-absent',
+                'border-wordle-absent'
+            );
+            tile.classList.add('border-wordle-tile-empty', 'bg-transparent');
+        });
+    }
+
+    function calculateStartIdleDemoFeedback(guess, target) {
+        var feedback = new Array(MAX_LENGTH).fill('absent');
+        var remainingLetters = {};
+
+        for (var letterIndex = 0; letterIndex < MAX_LENGTH; letterIndex++) {
+            if (guess[letterIndex] === target[letterIndex]) {
+                feedback[letterIndex] = 'correct';
+            } else {
+                var targetLetter = target[letterIndex];
+                remainingLetters[targetLetter] = (remainingLetters[targetLetter] || 0) + 1;
+            }
+        }
+
+        for (var checkIndex = 0; checkIndex < MAX_LENGTH; checkIndex++) {
+            if (feedback[checkIndex] === 'correct') continue;
+            var guessLetter = guess[checkIndex];
+            if (remainingLetters[guessLetter] > 0) {
+                feedback[checkIndex] = 'present';
+                remainingLetters[guessLetter]--;
+            }
+        }
+
+        return feedback;
+    }
+
+    function shuffleStartIdleDemoSequenceOrder() {
+        var order = IDLE_DEMO_SEQUENCES.map(function(_, sequenceIndex) {
+            return sequenceIndex;
+        });
+        for (var orderIndex = order.length - 1; orderIndex > 0; orderIndex--) {
+            var swapIndex = Math.floor(Math.random() * (orderIndex + 1));
+            var currentValue = order[orderIndex];
+            order[orderIndex] = order[swapIndex];
+            order[swapIndex] = currentValue;
+        }
+        if (order.length > 1 && order[0] === startIdleDemoLastSequenceIndex) {
+            var firstValue = order[0];
+            order[0] = order[1];
+            order[1] = firstValue;
+        }
+        startIdleDemoSequenceOrder = order;
+    }
+
+    function nextStartIdleDemoSequence() {
+        if (!startIdleDemoSequenceOrder.length) {
+            shuffleStartIdleDemoSequenceOrder();
+        }
+        var sequenceIndex = startIdleDemoSequenceOrder.shift();
+        startIdleDemoLastSequenceIndex = sequenceIndex;
+        return IDLE_DEMO_SEQUENCES[sequenceIndex];
+    }
+
+    function buildStartIdleDemoPuzzle() {
+        var sequence = nextStartIdleDemoSequence();
+        var rows = sequence.guesses.map(function(guess) {
+            return {
+                guess: guess,
+                feedback: calculateStartIdleDemoFeedback(guess, sequence.target)
+            };
         });
 
-        // Reveal status message, endgame actions, and next row after the last tile flips
-        var revealTiles = document.querySelectorAll('.tile-reveal');
-        if (revealTiles.length > 0) {
-            var lastDelay = (revealTiles.length - 1) * 300 + 500;
+        return { target: sequence.target, rows: rows };
+    }
+
+    function setStartIdleDemoRow(row, demoRow) {
+        row.querySelectorAll('[data-demo-cell]').forEach(function(tile, tileIndex) {
+            tile.dataset.demoLetter = demoRow.guess[tileIndex];
+            tile.dataset.color = IDLE_DEMO_FEEDBACK_CLASS[demoRow.feedback[tileIndex]];
+            tile.setAttribute('aria-label', demoRow.guess[tileIndex] + ', ' + demoRow.feedback[tileIndex]);
+        });
+    }
+
+    function typeStartIdleDemoRow(row) {
+        row.querySelectorAll('[data-demo-cell]').forEach(function(tile, tileIndex) {
+            scheduleStartIdleDemoAnimation(function() {
+                tile.textContent = tile.dataset.demoLetter || '';
+                tile.classList.remove('border-wordle-tile-empty', 'bg-transparent');
+                tile.classList.add('current-tile', 'border-wordle-tile-active', 'tile-pop');
+                setTimeout(function() { tile.classList.remove('tile-pop'); }, 120);
+            }, tileIndex * IDLE_DEMO_TYPE_MS);
+        });
+    }
+
+    function revealStartIdleDemoRow(row) {
+        row.querySelectorAll('[data-demo-cell][data-demo-letter]').forEach(function(tile) {
+            tile.classList.remove('current-tile', 'border-wordle-tile-active');
+            tile.classList.add('border-wordle-tile-empty', 'bg-transparent');
+            tile.classList.remove('tile-reveal');
+            void tile.offsetWidth;
+            tile.classList.add('tile-reveal');
+
+            var colorClass = tile.dataset.color || '';
+            var delayMs = getAnimationDelayMs(tile);
+            scheduleStartIdleDemoAnimation(function() {
+                tile.classList.remove('border-wordle-tile-empty', 'bg-transparent');
+                colorClass.split(' ').forEach(function(cls) {
+                    if (cls) tile.classList.add(cls);
+                });
+            }, delayMs + TILE_COLOR_OFFSET);
+        });
+    }
+
+    function runStartIdleDemoAnimation() {
+        clearStartIdleDemoTimeouts();
+        resetStartIdleDemoBoard();
+        var puzzle = buildStartIdleDemoPuzzle();
+        var rows = Array.prototype.slice.call(document.querySelectorAll('#start-idle-demo .guess-row'));
+        puzzle.rows.forEach(function(demoRow, rowIndex) {
+            var row = rows[rowIndex];
+            if (!row) return;
+            setStartIdleDemoRow(row, demoRow);
+            var rowDelayMs = rowIndex * IDLE_DEMO_ROW_MS;
+            scheduleStartIdleDemoAnimation(function() { typeStartIdleDemoRow(row); }, rowDelayMs);
+            scheduleStartIdleDemoAnimation(function() { revealStartIdleDemoRow(row); }, rowDelayMs + IDLE_DEMO_REVEAL_AFTER_MS);
+        });
+        startIdleDemoAnimationTimer = setTimeout(
+            runStartIdleDemoAnimation,
+            puzzle.rows.length * IDLE_DEMO_ROW_MS + IDLE_DEMO_RESTART_PAUSE_MS
+        );
+    }
+
+    function startStartIdleDemoAnimation() {
+        clearStartIdleDemoTimeouts();
+        runStartIdleDemoAnimation();
+    }
+
+    function stopStartIdleDemoAnimation() {
+        clearStartIdleDemoTimeouts();
+        resetStartIdleDemoBoard();
+    }
+
+    document.addEventListener('submit', function(event) {
+        var form = event.target.closest('#start-form');
+        if (!form) return;
+        event.preventDefault();
+        event.stopPropagation();
+        submitStartForm(form);
+    }, true);
+
+    document.addEventListener('keydown', function(event) {
+        if (!getStartScreen()) return;
+        if (startIdleDemoVisible) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            setStartIdleDemoVisible(false);
+            scheduleStartIdleDemo();
+            focusFirstStartInput();
+            return;
+        }
+        scheduleStartIdleDemo();
+    }, true);
+
+    function getAnimationDelayMs(element) {
+        var rawDelay = window.getComputedStyle(element).animationDelay || '0ms';
+        var firstDelay = rawDelay.split(',')[0].trim();
+        var parsedDelay = parseFloat(firstDelay);
+        if (!Number.isFinite(parsedDelay)) return 0;
+        return firstDelay.endsWith('ms') ? parsedDelay : parsedDelay * 1000;
+    }
+
+    document.addEventListener('click', function(event) {
+        var target = event.target.closest('.keyboard-key');
+        if (!target) return;
+        event.preventDefault();
+        if (target.dataset.action === 'enter') submitGuess();
+        else if (target.dataset.action === 'backspace') removeLetter();
+        else if (target.dataset.key) addLetter(target.dataset.key);
+        // Drop focus after a real pointer click so physical-keyboard letter
+        // entry keeps flowing (the global keydown handler bails on focused
+        // buttons). Keyboard-activated clicks (detail === 0) keep focus.
+        if (event.detail > 0) target.blur();
+    });
+
+    document.addEventListener('keydown', function(event) {
+        var target = event.target;
+        var tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+        // Space activates a focused link (anchors only do this for Enter
+        // natively); used by the START OVER links.
+        if (tag === 'A' && (event.key === ' ' || event.key === 'Spacebar')) {
+            event.preventDefault();
+            target.click();
+            return;
+        }
+
+        // Let Enter/Space activate a focused button or link natively
+        // (PLAY, LEADERBOARD, START OVER, on-screen keys) instead of hijacking
+        // it for the game keyboard. Other physical keys still drive the game
+        // even when an on-screen key has focus.
+        var focusedControl = tag === 'BUTTON' || tag === 'A' || tag === 'SELECT';
+        var gameInputKey = event.key === 'Backspace' || /^[a-zA-Z]$/.test(event.key);
+        if (focusedControl && !gameInputKey) return;
+
+        // Otherwise focus is on the page body — drive the game keyboard, but
+        // only while a guess can actually be made.
+        if (!document.getElementById('guess-form')) return;
+        if (event.key === 'Enter') { event.preventDefault(); submitGuess(); }
+        else if (event.key === 'Backspace') { event.preventDefault(); removeLetter(); }
+        else if (/^[a-zA-Z]$/.test(event.key)) { event.preventDefault(); addLetter(event.key); }
+    });
+
+    // ── HTMX lifecycle ─────────────────────────────────────────────────────────
+    document.body.addEventListener('htmx:afterSwap', function(event) {
+        var targetId = event.detail.target.id;
+
+        if (targetId === 'screen') {
+            currentGuess = '';
+            startInFlight = false;
+            countdownTimedOut = false;
+            stopTimer();
+            if (document.getElementById('game-screen')) {
+                stopStartIdleDemo();
+                updateHeaderColor('game');
+                initTimerFromScreen();
+                startCountdown();
+            } else if (document.getElementById('start-screen')) {
+                updateHeaderColor('start');
+                initStartIdleDemo();
+            } else if (document.getElementById('leaderboard-screen')) {
+                stopStartIdleDemo();
+                updateHeaderColor('leaderboard');
+                initMadlibCycle();
+            } else if (document.getElementById('share-screen')) {
+                stopStartIdleDemo();
+                stopCountdown();
+                updateHeaderColor('start');
+            }
+            return;
+        }
+
+        if (targetId === 'game-content') {
+            currentGuess = '';
+            setGuessInFlight(false);
+            // A landed guess resets the inactivity window (or stops it if the
+            // game just ended — startCountdown no-ops when there's no guess form).
+            startCountdown();
+
+            // Flip animation: apply color class at midpoint of each tile's flip,
+            // and light the matching keyboard key in sync with that tile.
+            document.querySelectorAll('.tile-reveal').forEach(function(tile) {
+                var colorClass = tile.dataset.color;
+                var delayMs = getAnimationDelayMs(tile);
+                setTimeout(function() {
+                    tile.classList.remove('border-wordle-tile-empty', 'border-wordle-tile-active', 'bg-transparent', 'bg-[rgba(55,71,97,0.3)]');
+                    colorClass.split(' ').forEach(function(cls) { tile.classList.add(cls); });
+                }, delayMs + TILE_COLOR_OFFSET);
+            });
+
+            document.querySelectorAll('#keyboard .keyboard-key[data-newbg][data-reveal-index]').forEach(function(kbKey) {
+                var keyDelayMs = parseInt(kbKey.dataset.revealIndex, 10) * TILE_FLIP_MS;
+                setTimeout(function() {
+                    kbKey.classList.remove('key-flip');
+                    void kbKey.offsetWidth;
+                    kbKey.classList.add('key-flip');
+                }, keyDelayMs);
+                setTimeout(function() {
+                    kbKey.classList.remove('bg-wordle-key', 'bg-green-500', 'bg-amber-500', 'bg-wordle-absent');
+                    kbKey.classList.add(kbKey.dataset.newbg);
+                }, keyDelayMs + TILE_COLOR_OFFSET);
+            });
+
+            // Show status + endgame after last tile finishes
+            var revealTiles = document.querySelectorAll('.tile-reveal');
+            var revealDelay = revealTiles.length > 0
+                ? (revealTiles.length - 1) * TILE_FLIP_MS + TILE_FLIP_MS + 200
+                : 0;
+
             setTimeout(function() {
                 var statusMsg = document.getElementById('status-message');
                 if (statusMsg) statusMsg.classList.remove('hidden');
-                var endgame = document.getElementById('endgame-actions');
-                if (endgame) endgame.classList.remove('hidden');
-                var currentTiles = document.querySelectorAll('.current-tile');
-                currentTiles.forEach(function(tile) {
-                    tile.classList.remove('border-gray-700/30', 'bg-gray-800/20');
-                    tile.classList.add('border-gray-600/50', 'bg-gray-800/40');
-                });
-            }, lastDelay);
-        } else {
-            // No animation (e.g. page reload) — show immediately
-            var statusMsg = document.getElementById('status-message');
-            if (statusMsg) statusMsg.classList.remove('hidden');
-            var endgame = document.getElementById('endgame-actions');
-            if (endgame) endgame.classList.remove('hidden');
-        }
 
-        // Auto-dismiss error message after 2 seconds
-        var errorMsg = document.getElementById('error-message');
-        if (errorMsg) {
-            setTimeout(function() { errorMsg.remove(); }, 2000);
+                var endgame = document.getElementById('endgame-actions');
+                if (endgame) {
+                    endgame.classList.remove('hidden');
+                    stopTimer();
+                }
+
+                document.querySelectorAll('.current-tile').forEach(function(tile) {
+                    tile.classList.remove('border-wordle-tile-active');
+                    tile.classList.add('border-wordle-tile-empty', 'bg-transparent');
+                });
+
+                var board = document.getElementById('game-board');
+                if (board && board.dataset.autoShareAfterReveal === 'true') {
+                    stopCountdown();
+                    setTimeout(function() {
+                        htmx.ajax('GET', '/share', { target: '#screen', swap: 'innerHTML' });
+                    }, AUTO_SHARE_AFTER_REVEAL_MS);
+                }
+            }, revealDelay);
+
+            // Auto-dismiss error overlay after 2 s
+            var errorMsg = document.getElementById('error-message');
+            if (errorMsg) setTimeout(function() { errorMsg.remove(); }, ERROR_DISMISS_MS);
         }
     });
 
-    // Handle guess errors without replacing the board
-    document.body.addEventListener('guessError', function(event) {
-        var message = event.detail.value;
+    function isGuessRequestEvent(event) {
+        var detail = event.detail || {};
+        if (detail.pathInfo && detail.pathInfo.requestPath === '/guess') return true;
+        if (detail.requestConfig && detail.requestConfig.path === '/guess') return true;
+        if (!detail.xhr || !detail.xhr.responseURL) return false;
+        try {
+            return new URL(detail.xhr.responseURL).pathname === '/guess';
+        } catch(e) {
+            return detail.xhr.responseURL.indexOf('/guess') >= 0;
+        }
+    }
 
-        // Shake the current row
+    function showGuessError(message) {
+        setGuessInFlight(false);
+
         var row = document.getElementById('current-row');
         if (row) {
             row.classList.add('shake');
-            setTimeout(function() { row.classList.remove('shake'); }, 500);
+            setTimeout(function() { row.classList.remove('shake'); }, SHAKE_DURATION_MS);
         }
 
-        // Show a toast
         var existing = document.getElementById('error-toast');
         if (existing) existing.remove();
 
         var toast = document.createElement('div');
         toast.id = 'error-toast';
-        toast.className = 'fixed top-16 left-1/2 -translate-x-1/2 bg-temporal-white text-temporal-black px-4 py-2 rounded font-bold text-sm z-50';
+        toast.className = 'fixed top-16 left-1/2 -translate-x-1/2 bg-white text-black px-4 py-2 rounded font-bold text-sm z-50';
         toast.textContent = message;
         document.body.appendChild(toast);
-        setTimeout(function() { toast.remove(); }, 2000);
+        setTimeout(function() { toast.remove(); }, ERROR_DISMISS_MS);
+    }
+
+    function guessErrorFromTriggerHeader(xhr) {
+        if (!xhr) return '';
+        var triggerHeader = xhr.getResponseHeader('HX-Trigger') || '';
+        if (!triggerHeader) return '';
+        try {
+            var triggers = JSON.parse(triggerHeader);
+            return triggers.guessError || '';
+        } catch(e) {
+            return '';
+        }
+    }
+
+    document.body.addEventListener('guessError', function(event) {
+        showGuessError(event.detail.value || 'Something went wrong — try again');
     });
+
+    document.body.addEventListener('htmx:responseError', function(event) {
+        if (isGuessRequestEvent(event)) {
+            showGuessError(
+                guessErrorFromTriggerHeader(event.detail.xhr) || 'Something went wrong — try again'
+            );
+        }
+    });
+
+    document.body.addEventListener('htmx:sendError', function(event) {
+        if (isGuessRequestEvent(event)) {
+            showGuessError('Something went wrong — try again');
+        }
+    });
+
+    initStartIdleDemo();
     </script>
 </body>
 </html>

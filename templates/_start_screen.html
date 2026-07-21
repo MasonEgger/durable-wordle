@@ -1,0 +1,111 @@
+<div id="start-screen" class="view screen-enter">
+    <div class="start-screen__live">
+
+        <!-- Top: mascot + tagline + divider -->
+        <div class="view__intro">
+            <img src="/static/mascot.svg" alt="Temporal mascot" class="mascot mascot--start" draggable="false">
+
+            <p class="tagline">
+                Get 6 chances to guess a 5-letter word
+            </p>
+
+            <div class="divider"></div>
+        </div>
+
+        <!-- Bottom: form inputs + side-by-side PLAY / LEADERBOARD buttons -->
+        <form id="start-form"
+              class="form-stack"
+              hx-post="/play"
+              hx-target="#screen"
+              hx-swap="innerHTML">
+
+            <div class="form-grid">
+                <div class="field">
+                    <label class="field-label">First Name</label>
+                    <input type="text" name="first_name" placeholder="MIN 3 CHARS" minlength="3" required
+                           class="text-input text-input--code">
+                </div>
+                <div class="field">
+                    <label class="field-label">Last Name</label>
+                    <input type="text" name="last_name" placeholder="MIN 3 CHARS" minlength="3"
+                           class="text-input text-input--code">
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="field-label">Email <span class="field-note">(for prize notification)</span></label>
+                <input type="email" name="email" placeholder="you@example.com" required
+                       class="text-input">
+            </div>
+
+            <p class="eyebrow">
+                A Quick Mad Libs Before You Start...
+            </p>
+
+            <div class="form-grid">
+                <input type="text" name="madlib_noun" placeholder="NOUN"
+                       class="text-input text-input--code">
+                <input type="text" name="madlib_verb" placeholder="PAST TENSE VERB"
+                       class="text-input text-input--code">
+            </div>
+
+            {% if show_game_mode_selector %}
+            <fieldset class="game-mode-selector game-mode-selector--start" aria-label="Game mode">
+                <label class="game-mode-option">
+                    <input type="radio" name="game_mode" value="random" checked>
+                    <span>Random</span>
+                </label>
+                <label class="game-mode-option">
+                    <input type="radio" name="game_mode" value="absurdle">
+                    <span>Absurdle</span>
+                </label>
+                <a class="game-mode-credit"
+                   href="https://qntm.org/absurdle"
+                   target="_blank"
+                   rel="noreferrer">Absurdle by qntm</a>
+            </fieldset>
+            {% endif %}
+
+            <div class="action-row">
+                <button type="submit"
+                        class="btn btn--primary btn--full">
+                    PLAY
+                </button>
+                <button type="button"
+                        class="btn btn--secondary btn--full"
+                        hx-get="/leaderboard-screen"
+                        hx-target="#screen"
+                        hx-swap="innerHTML">
+                    LEADERBOARD
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div id="start-idle-demo" class="wordle-demo" aria-hidden="true">
+        <h2 class="wordle-demo__title">How to play</h2>
+
+        <div class="wordle-demo__stage">
+            <div id="game-board" class="wordle-demo__board" role="grid" aria-label="Animated Wordle example">
+                {% for _ in range(6) %}
+                <div class="guess-row" role="row">
+                    {% for _ in range(5) %}
+                    <span class="wordle-tile tile-base border-wordle-tile-empty bg-transparent"
+                          role="gridcell" data-demo-cell aria-label="Empty"></span>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="wordle-demo__legend">
+                <span><b class="wordle-demo__swatch wordle-demo__swatch--correct"></b>Right spot</span>
+                <span><b class="wordle-demo__swatch wordle-demo__swatch--present"></b>Wrong spot</span>
+                <span><b class="wordle-demo__swatch wordle-demo__swatch--absent"></b>Not in word</span>
+            </div>
+
+            <p class="wordle-demo__caption">Guess. Read the colors. Solve in six.</p>
+        </div>
+
+        <p class="wordle-demo__prompt">PRESS ANY KEY</p>
+    </div>
+</div>

@@ -1,0 +1,73 @@
+<div id="leaderboard-screen"
+     class="view view--compact screen-enter"
+     data-madlibs="{{ madlibs_json }}">
+
+    <img src="/static/mascot.svg" alt="Temporal mascot" class="mascot mascot--leaderboard" draggable="false">
+
+    <p class="leaderboard-date">{{ game_date }}</p>
+
+    {% if entries and entries | selectattr("madlib_noun") | list %}
+    <div id="madlib-area" class="madlib-line">
+        <span class="soft">What if your</span>
+        <span id="madlib-noun-chip"
+              class="chip">
+            {{ entries[0].madlib_noun }}
+        </span>
+        <span class="soft">never</span>
+        <span id="madlib-verb-chip"
+              class="chip">
+            {{ entries[0].madlib_verb }}
+        </span>
+        <span class="soft">?</span>
+    </div>
+    {% else %}
+    <p class="madlib-line muted">
+        What if your
+        <span class="chip chip--muted">CODE</span>
+        never
+        <span class="chip chip--muted">FAILED</span>
+        ?
+    </p>
+    {% endif %}
+
+    {% if entries %}
+    <div class="leaderboard-list">
+        {% for entry in entries %}
+        <div class="leaderboard-row {% if loop.index <= 3 %}leaderboard-row--top{% endif %}">
+            {# Rank #}
+            <span class="leaderboard-rank">
+                {%- if loop.index == 1 %}🥇
+                {%- elif loop.index == 2 %}🥈
+                {%- elif loop.index == 3 %}🥉
+                {%- else %}{{ loop.index }}.{% endif -%}
+            </span>
+            {# Name #}
+            <span class="leaderboard-name">
+                {{ entry.player_name }}
+            </span>
+            {# Guess count #}
+            <span class="leaderboard-meta">
+                {{ entry.guesses }}&nbsp;word{{ "s" if entry.guesses != 1 }}
+            </span>
+            {# Time #}
+            <span class="leaderboard-time">
+                {{ entry.elapsed_formatted }}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">
+        No scores yet. Win a game to post your time!
+    </p>
+    {% endif %}
+
+    <a href="/new-game"
+       hx-get="/new-game"
+       hx-target="#screen"
+       hx-swap="innerHTML"
+       class="btn">
+        START OVER <span aria-hidden="true">&#8635;</span>
+    </a>
+
+</div>

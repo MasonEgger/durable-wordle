@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Durable Wordle — Display</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/tailwind.css">
+    <link rel="stylesheet" href="/static/booth/display.css">
+</head>
+<body>
+
+<!-- Particle field (shared background) -->
+<div id="particles"></div>
+
+<!-- ── CALIBRATION OVERLAY (pre-flight: find the fan's circle) ───────────── -->
+<div id="calibration" class="hidden">
+    <div id="cal-target" class="display-shifted">
+        <div class="cal-cross-h"></div>
+        <div class="cal-cross-v"></div>
+        <div class="cal-ring cal-ring--sm"></div>
+        <div class="cal-ring cal-ring--md"></div>
+        <div class="cal-ring cal-ring--lg"></div>
+        <div class="cal-ring cal-ring--xl"></div>
+        <div class="cal-ring cal-ring--xxl"></div>
+        <div id="cal-full-circle"></div>
+        <div id="cal-center-dot"></div>
+    </div>
+    <div id="cal-panel" aria-label="Circle calibration controls">
+        <div class="cal-status">
+            <h2>Circle Calibration</h2>
+            <div id="cal-readout">x:0px · y:0px · w:68vmin</div>
+        </div>
+        <div class="cal-control-group" aria-label="Move circle">
+            <div class="cal-btn-grid">
+                <button class="cal-btn cal-btn--ghost" type="button" tabindex="-1" aria-hidden="true"></button>
+                <button class="cal-btn" type="button" data-nudge="up" aria-label="Move up">&#8593;</button>
+                <button class="cal-btn cal-btn--ghost" type="button" tabindex="-1" aria-hidden="true"></button>
+                <button class="cal-btn" type="button" data-nudge="left" aria-label="Move left">&#8592;</button>
+                <button class="cal-btn cal-btn--center" type="button" data-nudge="center" aria-label="Reset position">&#9678;</button>
+                <button class="cal-btn" type="button" data-nudge="right" aria-label="Move right">&#8594;</button>
+                <button class="cal-btn cal-btn--ghost" type="button" tabindex="-1" aria-hidden="true"></button>
+                <button class="cal-btn" type="button" data-nudge="down" aria-label="Move down">&#8595;</button>
+                <button class="cal-btn cal-btn--ghost" type="button" tabindex="-1" aria-hidden="true"></button>
+            </div>
+        </div>
+        <div id="cal-width-controls" class="cal-control-group" aria-label="Resize circle">
+            <button class="cal-btn cal-btn--wide" type="button" data-width="-1" aria-label="Shrink circle">&#8722;</button>
+            <span class="cal-label">Size</span>
+            <button class="cal-btn cal-btn--wide" type="button" data-width="1" aria-label="Grow circle">+</button>
+        </div>
+        <button id="cal-save" type="button">Save &amp; Launch</button>
+    </div>
+</div>
+
+<!-- ── ATTRACT MODE ─────────────────────────────────────────────────────── -->
+<div id="attract" class="display-shifted">
+
+    <!-- Panel 0: Logo / idle -->
+    <div class="attract-panel active" id="logo-panel">
+        <div class="panel-stack">
+            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float ziggy-large">
+            <img src="/static/temporal-logo-lockup-white.svg" alt="Temporal" class="display-logo">
+            <p class="display-title">Durable Wordle</p>
+        </div>
+    </div>
+
+    <!-- Panel 1: Madlib cycling -->
+    <div class="attract-panel" id="madlib-panel">
+        <div class="panel-stack">
+            <img src="/static/mascot.svg" alt="Ziggy" class="ziggy-float ziggy-medium">
+            <div id="madlib-area" class="phrase-row">
+                <span class="phrase-text">What if your</span>
+                <span class="madlib-chip" id="madlib-noun">CODE</span>
+                <span class="phrase-text">never</span>
+                <span class="madlib-chip" id="madlib-verb">FAILED</span>
+                <span class="phrase-text">?</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel 2: Leaderboard -->
+    <div class="attract-panel" id="leaderboard-panel">
+        <div class="panel-stack panel-stack--leaderboard">
+            <p class="display-eyebrow">{{ game_date }} · Today's Leaderboard</p>
+            {% if entries %}
+            <div id="lb-viewport">
+                <div id="lb-list">
+                {% for entry in entries %}
+                <div class="lb-row {% if loop.index <= 3 %}top{% endif %}">
+                    <span class="lb-rank {% if loop.index == 1 %}lb-rank--first{% elif loop.index == 2 or loop.index == 3 %}lb-rank--podium{% else %}lb-rank--standard{% endif %}">
+                        {%- if loop.index == 1 %}🥇{%- elif loop.index == 2 %}🥈{%- elif loop.index == 3 %}🥉{%- else %}{{ loop.index }}.{%- endif -%}
+                    </span>
+                    <span class="lb-name">{{ entry.player_name }}</span>
+                    <span class="lb-guesses">{{ entry.guesses }} word{{ "s" if entry.guesses != 1 }}</span>
+                    <span class="lb-time">{{ entry.elapsed_formatted }}</span>
+                </div>
+                {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <p class="display-empty">No scores yet today. Be the first!</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Progress dots -->
+    <div id="attract-dots">
+        <div class="dot active" id="dot-0"></div>
+        <div class="dot" id="dot-1"></div>
+        <div class="dot" id="dot-2"></div>
+    </div>
+</div>
+
+<!-- ── GAME MODE ──────────────────────────────────────────────────────────── -->
+<div id="game-mode" class="hidden display-shifted">
+    <iframe id="timeline-frame" src="about:blank"></iframe>
+    <div id="timeline-caption"></div>
+    <div id="timeline-box">
+        <span id="timeline-waiting">Loading timeline…</span>
+    </div>
+    <div id="live-badge">
+        <div class="live-dot"></div>
+        <span>Live Workflow</span>
+    </div>
+</div>
+
+<!-- ── WIN CELEBRATION ────────────────────────────────────────────────────── -->
+<div id="celebration" class="hidden display-shifted">
+    <div id="celebration-confetti"></div>
+    <div id="celebration-inner">
+        <div class="celeb-emoji">🎉</div>
+        <div class="celeb-name" id="celeb-name">PLAYER</div>
+        <div class="celeb-detail" id="celeb-detail">solved it</div>
+        <div class="celeb-rank" id="celeb-rank">RANKED #1</div>
+    </div>
+</div>
+
+<!-- ── LOSS REVEAL ───────────────────────────────────────────────────────── -->
+<div id="loss-reveal" class="hidden display-shifted">
+    <div id="loss-inner">
+        <div class="loss-eyebrow">Out of moves</div>
+        <div class="loss-copy">The word was</div>
+        <div id="loss-word" class="loss-word" aria-live="polite"></div>
+        <div id="loss-detail" class="loss-detail"></div>
+    </div>
+</div>
+
+<script>window.__DISPLAY__ = { madlibs: {{ madlibs_json | safe }} };</script>
+<script src="/static/booth/display.js"></script>
+</body>
+</html>

@@ -22,8 +22,8 @@ class TestAnswerList:
             assert word.isalpha(), f"Answer word {word!r} is not alphabetic"
 
     def test_answer_list_has_reasonable_size(self) -> None:
-        assert 200 <= len(ANSWER_LIST) <= 500, (
-            f"Answer list has {len(ANSWER_LIST)} words, expected 200-500"
+        assert 2000 <= len(ANSWER_LIST) <= 3000, (
+            f"Answer list has {len(ANSWER_LIST)} words, expected 2000-3000"
         )
 
 

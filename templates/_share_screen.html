@@ -1,0 +1,77 @@
+{# Shareable "I beat Durable Wordle!" result card — built for a phone photo. #}
+<div id="share-screen"
+     class="view view--compact screen-enter">
+
+    {# The card — framed so it photographs cleanly full-screen. #}
+    <div class="share-card">
+
+        <p class="share-kicker">
+            {{ "I beat" if won else "I played" }}
+        </p>
+        <h2 class="share-title">
+            Durable Wordle
+        </h2>
+
+        {% if player_name %}
+        <p class="share-player">{{ player_name }}</p>
+        {% endif %}
+
+        {# Colored-square grid — the classic 🟩🟨⬛ recap. #}
+        <div class="share-grid" role="img"
+             aria-label="Guess grid:&#10;{{ emoji_grid }}">
+            {% for guess in guesses %}
+            <div class="share-grid-row">
+                {% for fb in guess.feedback %}
+                <div class="share-cell {{ tile_feedback_css[fb.value] }}"></div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+
+        {# Stats — guesses + time. #}
+        <div class="stat-grid">
+            <div class="stat-card">
+                <span class="stat-value">{{ guess_count }}</span>
+                <span class="stat-label">
+                    guess{{ "es" if guess_count != 1 }}
+                </span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">{{ elapsed_formatted }}</span>
+                <span class="stat-label">time</span>
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        {# Branding + QR to learn more about Temporal. #}
+        <div class="share-branding">
+            <div class="share-brand">
+                <img src="/static/temporal-logo-lockup-white.svg" alt="Temporal"
+                     class="share-logo" draggable="false">
+                <p class="share-subcopy">
+                    Durable execution<br>that never forgets
+                </p>
+            </div>
+            <div class="qr-stack">
+                <div class="qr-box">
+                    <img src="/static/temporal-qr.svg" alt="Scan to learn more at temporal.io"
+                         draggable="false">
+                </div>
+                <span class="tiny-label">temporal.io</span>
+            </div>
+        </div>
+    </div>
+
+    {# Footer actions — kept below the card so they stay out of the photo. #}
+    <div class="action-row">
+        <a href="/new-game"
+           hx-get="/new-game"
+           hx-target="#screen"
+           hx-swap="innerHTML"
+           class="btn btn--small">
+            START OVER <span aria-hidden="true">&#8635;</span>
+        </a>
+    </div>
+
+</div>

@@ -23,6 +23,7 @@ dev = [
     "httpx",
     "types-requests",
     "pytest-cov>=7.1.0",
+    "pytest-playwright>=0.8.0",
 ]
 
 [build-system]
@@ -46,3 +47,9 @@ strict = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
+# E2E (browser) tests are opt-in: excluded from the default gate, run via
+# `just test-e2e`. They boot the full stack plus a headless browser.
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: full-stack browser tests (require the temporal binary + chromium)",
+]

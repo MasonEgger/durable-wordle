@@ -29,6 +29,9 @@ services:
       - worker
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
+      # Defaults to classic (plain Wordle). Set DURABLE_WORDLE_APP_MODE=booth
+      # to run the conference-booth lead-capture experience instead.
+      # - DURABLE_WORDLE_APP_MODE=booth
 
 volumes:
   temporal-data:

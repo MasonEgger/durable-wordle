@@ -2,6 +2,7 @@
 # across workflow and API tests.
 import uuid
 from collections.abc import AsyncGenerator, Generator
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,6 +36,19 @@ def mock_dictionary_api() -> Generator[MagicMock, None, None]:
 
         mock_get.side_effect = fake_get
         yield mock_get
+
+
+@pytest.fixture(autouse=True)
+def isolate_leaderboard_db(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Generator[None, None, None]:
+    """Point all tests at a throwaway leaderboard DB."""
+    from durable_wordle.booth import leaderboard
+
+    monkeypatch.setattr(leaderboard, "DB_FILE", tmp_path / "leaderboard.db")
+    monkeypatch.setattr(leaderboard, "_schema_ready", False)
+    yield
+    monkeypatch.setattr(leaderboard, "_schema_ready", False)
 
 
 @pytest.fixture()

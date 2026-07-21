@@ -2,6 +2,7 @@
 # valid/invalid guesses, win/loss conditions, and post-game rejection.
 import concurrent.futures
 import uuid
+from datetime import timedelta
 
 import pytest
 from temporalio.client import WorkflowFailureError, WorkflowUpdateFailedError
@@ -11,15 +12,27 @@ from temporalio.worker import Worker
 
 from durable_wordle.activities import (
     calculate_feedback,
+    choose_absurdle_feedback,
     select_word,
     validate_guess,
 )
-from durable_wordle.models import LetterFeedback, MakeGuessInput, WorkflowInput
-from durable_wordle.word_lists import ANSWER_LIST
+from durable_wordle.models import (
+    GameMode,
+    LetterFeedback,
+    MakeGuessInput,
+    WorkflowInput,
+)
+from durable_wordle.word_lists import ANSWER_LIST, VALID_GUESSES
 from durable_wordle.workflow import UserSessionWorkflow
 
 # Valid 5-letter words that are NOT in the answer list (guaranteed wrong)
 WRONG_GUESSES = ["ABOVE", "ABUSE", "ACTOR", "ADMIT", "ADOPT", "ADULT"]
+WORKFLOW_ACTIVITIES = [
+    calculate_feedback,
+    choose_absurdle_feedback,
+    select_word,
+    validate_guess,
+]
 
 
 class TestUserSessionWorkflow:
@@ -34,12 +47,12 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -66,12 +79,12 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -92,12 +105,12 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -117,12 +130,12 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -142,12 +155,12 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -181,12 +194,12 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -222,12 +235,12 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
                     UserSessionWorkflow.run,
-                    WorkflowInput(session_id="test-session", random_mode=True),
+                    WorkflowInput(session_id="test-session"),
                     id=str(uuid.uuid4()),
                     task_queue=task_queue,
                 )
@@ -266,7 +279,7 @@ class TestUserSessionWorkflow:
                 workflow_environment.client,
                 task_queue=task_queue,
                 workflows=[UserSessionWorkflow],
-                activities=[calculate_feedback, select_word, validate_guess],
+                activities=WORKFLOW_ACTIVITIES,
                 activity_executor=executor,
             ):
                 handle = await workflow_environment.client.start_workflow(
@@ -285,3 +298,131 @@ class TestUserSessionWorkflow:
                 state = await handle.query(UserSessionWorkflow.get_game_state)
                 assert state.target_word in ANSWER_LIST
                 assert state.status == "playing"
+
+    async def test_absurdle_mode_tracks_remaining_candidates(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Absurdle mode should persist candidate state after each guess."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=WORKFLOW_ACTIVITIES,
+                activity_executor=executor,
+            ):
+                handle = await workflow_environment.client.start_workflow(
+                    UserSessionWorkflow.run,
+                    WorkflowInput(
+                        session_id="absurdle-session",
+                        game_mode=GameMode.ABSURDLE,
+                    ),
+                    id=str(uuid.uuid4()),
+                    task_queue=task_queue,
+                )
+
+                result = await handle.execute_update(
+                    UserSessionWorkflow.make_guess,
+                    MakeGuessInput(guess="CRANE"),
+                )
+
+                state = await handle.query(UserSessionWorkflow.get_game_state)
+                assert result.word == "CRANE"
+                assert state.game_mode is GameMode.ABSURDLE
+                assert state.status == "playing"
+                assert 0 < len(state.remaining_candidates) < len(ANSWER_LIST)
+                assert state.target_word in state.remaining_candidates
+
+    async def test_absurdle_uses_answer_list_candidates_but_accepts_valid_guesses(
+        self, workflow_environment: WorkflowEnvironment, task_queue: str
+    ) -> None:
+        """Absurdle should match qntm: answer candidates are narrower than guesses."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            async with Worker(
+                workflow_environment.client,
+                task_queue=task_queue,
+                workflows=[UserSessionWorkflow],
+                activities=WORKFLOW_ACTIVITIES,
+                activity_executor=executor,
+            ):
+                handle = await workflow_environment.client.start_workflow(
+                    UserSessionWorkflow.run,
+                    WorkflowInput(
+                        session_id="absurdle-valid-guess-session",
+                        game_mode=GameMode.ABSURDLE,
+                    ),
+                    id=str(uuid.uuid4()),
+                    task_queue=task_queue,
+                )
+
+                initial_state = await handle.query(UserSessionWorkflow.get_game_state)
+                assert len(initial_state.remaining_candidates) == len(ANSWER_LIST)
+                assert "ADIEU" in VALID_GUESSES
+                assert "ADIEU" not in ANSWER_LIST
+
+                result = await handle.execute_update(
+                    UserSessionWorkflow.make_guess,
+                    MakeGuessInput(guess="ADIEU"),
+                )
+
+                state = await handle.query(UserSessionWorkflow.get_game_state)
+                assert result.word == "ADIEU"
+                assert state.status == "playing"
+                assert 0 < len(state.remaining_candidates) < len(ANSWER_LIST)
+
+
+class TestInactivityTimeout:
+    """Tests for the inactivity timeout that abandons idle games."""
+
+    async def test_game_abandoned_after_inactivity(self) -> None:
+        """A game with no guesses should abandon once the timeout elapses."""
+        async with await WorkflowEnvironment.start_time_skipping() as env:
+            task_queue = f"timeout-{uuid.uuid4()}"
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                async with Worker(
+                    env.client,
+                    task_queue=task_queue,
+                    workflows=[UserSessionWorkflow],
+                    activities=WORKFLOW_ACTIVITIES,
+                    activity_executor=executor,
+                ):
+                    handle = await env.client.start_workflow(
+                        UserSessionWorkflow.run,
+                        WorkflowInput(session_id="idle-session"),
+                        id=str(uuid.uuid4()),
+                        task_queue=task_queue,
+                    )
+                    # Time-skipping fast-forwards through the 60s timer.
+                    final_state = await handle.result()
+                    assert final_state.status == "abandoned"
+                    assert len(final_state.guesses) == 0
+
+    async def test_zero_inactivity_timeout_keeps_game_running(self) -> None:
+        """A zero timeout should preserve the original untimed classic flow."""
+        async with await WorkflowEnvironment.start_time_skipping() as env:
+            task_queue = f"untimed-{uuid.uuid4()}"
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                async with Worker(
+                    env.client,
+                    task_queue=task_queue,
+                    workflows=[UserSessionWorkflow],
+                    activities=WORKFLOW_ACTIVITIES,
+                    activity_executor=executor,
+                ):
+                    handle = await env.client.start_workflow(
+                        UserSessionWorkflow.run,
+                        WorkflowInput(
+                            session_id="untimed-session",
+                            inactivity_timeout_seconds=0,
+                        ),
+                        id=str(uuid.uuid4()),
+                        task_queue=task_queue,
+                    )
+
+                    await env.sleep(timedelta(seconds=120))
+
+                    state = await handle.query(UserSessionWorkflow.get_game_state)
+                    assert state.status == "playing"
+                    assert len(state.guesses) == 0
+
+                    await handle.terminate("test cleanup")
