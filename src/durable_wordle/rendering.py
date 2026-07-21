@@ -134,7 +134,8 @@ def game_context(
     status = game_state.status if game_state else "playing"
     app_mode = getattr(request.app.state, "app_mode", "")
     show_game_timers = app_mode != "classic"
-    selected_game_mode = game_state.game_mode if game_state else GameMode.RANDOM
+    default_game_mode = GameMode.DAILY if app_mode == "classic" else GameMode.RANDOM
+    selected_game_mode = game_state.game_mode if game_state else default_game_mode
     show_game_mode_selector = (
         bool(getattr(request.app.state, "show_game_mode_selector", False))
         and status == "playing"

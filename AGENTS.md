@@ -51,7 +51,7 @@ flowchart LR
 
 ### Runtime Modes
 
-- **Classic mode** (`DURABLE_WORDLE_APP_MODE=classic`, used by `just dev`) is the teachable board-first game. It exposes Daily, Random, and Absurdle selectors and avoids booth lead capture, display, and leaderboard routes in the main learning flow.
+- **Classic mode** (`DURABLE_WORDLE_APP_MODE=classic`, used by `just dev`) is the teachable board-first game. It exposes Daily, Random, and Absurdle selectors and avoids booth lead capture, display, and leaderboard routes in the main learning flow. Classic is the default: an unset or unrecognized `DURABLE_WORDLE_APP_MODE` resolves to classic, so `just ui` and `docker compose up` also run classic. Classic defaults to the Daily word; booth defaults to Random. The per-app-mode default lives in `_default_game_mode()` in `api.py`.
 - **Booth mode** (`DURABLE_WORDLE_APP_MODE=booth`, used by `just booth`) adds lead capture, madlibs, SQLite leaderboard/participants, the second-screen display, kiosk positioning, and the Temporal UI proxy. Booth-only Python modules live under `src/durable_wordle/booth/`; booth-only display assets live under `templates/booth/` and `static/booth/`.
 
 ### Screens (Booth SPA)
