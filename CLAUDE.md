@@ -68,14 +68,15 @@ The app is a single-page SPA. `<main id="screen">` is the HTMX swap target. Thre
 | `madlib_noun` | `POST /play` | — | Cycling leaderboard phrase |
 | `madlib_verb` | `POST /play` | — | Cycling leaderboard phrase |
 
-(Note: the web app is random-mode only — daily mode was removed. `get_workflow_id(game_id)` always builds `wordle-random-{game_id}`.)
+(Note: the active mode comes from the `game_mode` form field or cookie, falling back to the app-mode default via `_default_game_mode()`: classic defaults to daily, booth defaults to random. The cookie table above reflects the booth `POST /play` flow.)
 
 ### Workflow IDs
 
 - Daily: `wordle-{YYYY-MM-DD}-{session_id}`
 - Random: `wordle-random-{game_id}`
+- Absurdle: `wordle-absurdle-{game_id}`
 
-`get_workflow_id(session_id, game_date, game_id)` in `api.py` is the single source of truth.
+`get_workflow_id(game_id, *, session_id, game_date, game_mode)` in `api.py` is the single source of truth.
 
 ### Routing
 
