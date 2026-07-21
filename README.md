@@ -17,6 +17,29 @@ Random, and Absurdle modes. The conference booth experience is documented
 separately in [docs/booth/README.md](docs/booth/README.md) so the main learning
 path stays focused on Temporal.
 
+## Modes
+
+The app runs in one of two modes, selected by the `DURABLE_WORDLE_APP_MODE`
+environment variable.
+
+**Classic (the default).**
+A plain, board-first Wordle: open the page and play.
+No sign-up, no lead capture, no database.
+This is what you get when the variable is unset, so a fresh `git clone` followed
+by `just dev`, `just ui`, or `docker compose up` runs classic.
+If you just want the Temporal Wordle demo, you never touch this variable.
+
+**Booth.**
+The conference-booth experience layered on top of the same workflow: a lead-capture
+start screen (name, email, madlib), a SQLite leaderboard, a second-screen display,
+and a reverse proxy for the Temporal UI.
+Opt in with `just booth`, or set `DURABLE_WORDLE_APP_MODE=booth` (for example in the
+`docker-compose.yml` `web` service).
+See [docs/booth/README.md](docs/booth/README.md) for the full setup.
+
+Both modes run the identical `UserSessionWorkflow`. The mode only changes the web
+skin and the booth-only extras; the game itself lives in the workflow either way.
+
 ## Temporal Concepts Demonstrated
 
 | Concept | What It Does Here | Where to Look |
@@ -146,6 +169,7 @@ development out of the box.
 | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal server address |
 | `TEMPORAL_NAMESPACE` | `default` | Temporal namespace |
 | `TEMPORAL_TASK_QUEUE` | `wordle-tasks` | Task queue name (app-specific) |
+| `DURABLE_WORDLE_APP_MODE` | `classic` | Runtime mode: `classic` or `booth` (see [Modes](#modes)) |
 
 For Temporal Cloud, set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and
 `TEMPORAL_API_KEY` (or mTLS certs). See the
@@ -247,6 +271,9 @@ docker compose up --build
 
 Open **http://localhost:8000** to play. The Temporal UI is available at
 **http://localhost:8233**.
+
+This runs classic mode by default. To run the booth experience instead, set
+`DURABLE_WORDLE_APP_MODE=booth` on the `web` service in `docker-compose.yml`.
 
 To stop:
 

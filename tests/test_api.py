@@ -37,10 +37,16 @@ WORKFLOW_ACTIVITIES = [
 def _make_client(
     workflow_environment: WorkflowEnvironment, task_queue: str
 ) -> AsyncClient:
-    """Build an AsyncClient wired to the test Temporal environment."""
+    """Build an AsyncClient wired to the test Temporal environment.
+
+    Defaults to booth mode: most tests in this module exercise booth-only
+    features (start screen, madlib, leaderboard). Classic-mode tests build
+    their own app with ``app_mode="classic"``.
+    """
     app = create_app(
         task_queue=task_queue,
         temporal_client=workflow_environment.client,
+        app_mode="booth",
     )
     app.state.temporal_client = workflow_environment.client
     app.state.task_queue = task_queue
